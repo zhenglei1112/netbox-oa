@@ -4,18 +4,34 @@ from .models import WorkflowDefinition, WorkflowInstance, WorkflowTask
 
 
 class WorkflowDefinitionFilterSet(django_filters.FilterSet):
+    name = django_filters.CharFilter(lookup_expr="icontains", label="流程名称")
+    slug = django_filters.CharFilter(lookup_expr="icontains", label="流程标识")
+    enabled = django_filters.BooleanFilter(label="是否启用")
+
     class Meta:
         model = WorkflowDefinition
         fields = ("id", "name", "slug", "enabled")
 
 
 class WorkflowInstanceFilterSet(django_filters.FilterSet):
+    definition_id = django_filters.NumberFilter(label="流程定义 ID")
+    requester_id = django_filters.NumberFilter(label="申请人 ID")
+    status = django_filters.ChoiceFilter(
+        choices=WorkflowInstance._meta.get_field("status").choices, label="流程状态"
+    )
+
     class Meta:
         model = WorkflowInstance
         fields = ("id", "definition_id", "requester_id", "status")
 
 
 class WorkflowTaskFilterSet(django_filters.FilterSet):
+    instance_id = django_filters.NumberFilter(label="所属流程 ID")
+    assigned_group_id = django_filters.NumberFilter(label="审批组 ID")
+    status = django_filters.ChoiceFilter(
+        choices=WorkflowTask._meta.get_field("status").choices, label="任务状态"
+    )
+
     class Meta:
         model = WorkflowTask
         fields = ("id", "instance_id", "assigned_group_id", "status")

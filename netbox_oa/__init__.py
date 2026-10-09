@@ -10,7 +10,7 @@ class NetBoxOAConfig(PluginConfig):
     version = __version__
     base_url = "oa"
     min_version = "4.4.2"
-    max_version = "4.4.99"
+    max_version = "4.6.99"
     django_apps = ["django_fsm_log"]
     default_auto_field = "django.db.models.BigAutoField"
 

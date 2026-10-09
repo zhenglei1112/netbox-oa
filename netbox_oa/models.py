@@ -11,11 +11,11 @@ from .validators import validate_payload, validate_steps
 
 
 class WorkflowDefinition(ChangeLoggedModel):
-    name = models.CharField(max_length=100, unique=True)
-    slug = models.SlugField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    enabled = models.BooleanField(default=True)
-    steps = models.JSONField(default=list, validators=[validate_steps])
+    name = models.CharField(max_length=100, unique=True, verbose_name="流程名称")
+    slug = models.SlugField(max_length=100, unique=True, verbose_name="流程标识")
+    description = models.TextField(blank=True, verbose_name="描述说明")
+    enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    steps = models.JSONField(default=list, validators=[validate_steps], verbose_name="审批节点")
 
     class Meta:
         ordering = ("name",)
@@ -55,21 +55,36 @@ class WorkflowStateModel(ChangeLoggedModel):
 
 
 class WorkflowInstance(WorkflowStateModel):
-    title = models.CharField(max_length=200)
+    title = models.CharField(max_length=200, verbose_name="申请标题")
     definition = models.ForeignKey(
-        WorkflowDefinition, on_delete=models.PROTECT, related_name="instances"
+        WorkflowDefinition,
+        on_delete=models.PROTECT,
+        related_name="instances",
+        verbose_name="流程定义",
     )
     requester = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="oa_requests"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="oa_requests",
+        verbose_name="申请人",
     )
     status = FSMField(
-        max_length=20, default=WorkflowStatus.DRAFT, choices=WorkflowStatus, protected=True
+        max_length=20,
+        default=WorkflowStatus.DRAFT,
+        choices=WorkflowStatus,
+        protected=True,
+        verbose_name="流程状态",
     )
-    payload = models.JSONField(default=dict, blank=True, validators=[validate_payload])
-    steps_snapshot = models.JSONField(default=list, blank=True)
-    current_step = models.PositiveIntegerField(default=0)
+    payload = models.JSONField(
+        default=dict, blank=True, validators=[validate_payload], verbose_name="业务数据"
+    )
+    steps_snapshot = models.JSONField(default=list, blank=True, verbose_name="节点快照")
+    current_step = models.PositiveIntegerField(default=0, verbose_name="当前节点")
     approval_groups = models.ManyToManyField(
-        "users.Group", through="WorkflowGroupReservation", related_name="oa_instances"
+        "users.Group",
+        through="WorkflowGroupReservation",
+        related_name="oa_instances",
+        verbose_name="审批组",
     )
 
     class Meta:
@@ -131,22 +146,31 @@ class WorkflowGroupReservation(models.Model):
 
 
 class WorkflowTask(WorkflowStateModel):
-    instance = models.ForeignKey(WorkflowInstance, on_delete=models.PROTECT, related_name="tasks")
-    name = models.CharField(max_length=100)
-    position = models.PositiveIntegerField()
-    assigned_group = models.ForeignKey(
-        "users.Group", on_delete=models.PROTECT, related_name="oa_tasks"
+    instance = models.ForeignKey(
+        WorkflowInstance, on_delete=models.PROTECT, related_name="tasks", verbose_name="所属流程"
     )
-    status = FSMField(max_length=20, default=TaskStatus.PENDING, choices=TaskStatus, protected=True)
+    name = models.CharField(max_length=100, verbose_name="任务名称")
+    position = models.PositiveIntegerField(verbose_name="节点序号")
+    assigned_group = models.ForeignKey(
+        "users.Group", on_delete=models.PROTECT, related_name="oa_tasks", verbose_name="审批组"
+    )
+    status = FSMField(
+        max_length=20,
+        default=TaskStatus.PENDING,
+        choices=TaskStatus,
+        protected=True,
+        verbose_name="任务状态",
+    )
     decided_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="oa_decisions",
+        verbose_name="处理人",
     )
-    decided_at = models.DateTimeField(null=True, blank=True)
-    comment = models.TextField(blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True, verbose_name="处理时间")
+    comment = models.TextField(blank=True, verbose_name="审批意见")
 
     class Meta:
         ordering = ("instance", "position")

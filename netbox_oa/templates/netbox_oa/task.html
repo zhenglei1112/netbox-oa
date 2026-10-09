@@ -5,7 +5,7 @@
   <div class="card-body">
     <p>流程：{{ object.instance }} · 审批组：{{ object.assigned_group }} · 状态：{{ object.get_status_display }}</p>
     <p>处理人：{{ object.decided_by|default:'—' }} · 处理时间：{{ object.decided_at|default:'—' }}</p>
-    <p>{{ object.comment }}</p>
+    <p>审批意见：{{ object.comment|default:'暂无' }}</p>
     {% if can_act and object.status == 'pending' %}
     <form method="post">
       {% csrf_token %}<label for="comment">审批意见</label>
