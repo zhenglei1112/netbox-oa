@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netbox-oa"
+version = "0.1.0"
+description = "Lightweight sequential approval workflows for NetBox"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = ["django-fsm-2>=4.0,<5", "django-fsm-log>=5.0.2,<6"]
+
+[project.optional-dependencies]
+dev = ["Django==5.2.6", "djangorestframework==3.16.1", "django-filter==25.1", "ruff>=0.11,<1", "build>=1.2,<2", "setuptools>=75"]
+
+[tool.setuptools.packages.find]
+include = ["netbox_oa*"]
+
+[tool.setuptools.package-data]
+netbox_oa = ["templates/**/*.html"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".reference"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]

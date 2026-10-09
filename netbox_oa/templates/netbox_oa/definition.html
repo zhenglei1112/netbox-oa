@@ -1,0 +1,11 @@
+{% extends 'generic/object.html' %}
+{% block content %}
+<div class="card">
+  <h2 class="card-header">流程定义</h2>
+  <div class="card-body">
+    <p>{{ object.description }}</p>
+    <p>启用：{{ object.enabled|yesno:'是,否' }}</p>
+    <ol>{% for step in object.steps %}<li>{{ step.name }}（审批组 ID：{{ step.group_id }}）</li>{% endfor %}</ol>
+  </div>
+</div>
+{% endblock %}

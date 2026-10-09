@@ -1,0 +1,32 @@
+{% extends 'generic/object.html' %}
+{% block content %}
+<div class="card mb-3">
+  <h2 class="card-header">流程实例</h2>
+  <div class="card-body">
+    <p>流程：{{ object.definition }} · 申请人：{{ object.requester }} · 状态：{{ object.get_status_display }}</p>
+    <pre>{{ object.payload }}</pre>
+    {% if can_act %}
+      {% if object.status == 'draft' %}
+      <form method="post" action="{% url 'plugins:netbox_oa:action' kind='instance' pk=object.pk operation='submit' %}">
+        {% csrf_token %}<button class="btn btn-primary" type="submit">提交审批</button>
+      </form>
+      {% endif %}
+      {% if object.status == 'draft' or object.status == 'pending' %}
+      <form class="mt-2" method="post" action="{% url 'plugins:netbox_oa:action' kind='instance' pk=object.pk operation='cancel' %}">
+        {% csrf_token %}<label for="comment">撤销原因</label>
+        <input id="comment" class="form-control mb-2" name="comment" maxlength="4000">
+        <button class="btn btn-warning" type="submit">撤销流程</button>
+      </form>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+<div class="card mb-3">
+  <h2 class="card-header">审批任务</h2>
+  <ul class="list-group list-group-flush">
+    {% for task in tasks %}<li class="list-group-item"><a href="{{ task.get_absolute_url }}">{{ task.name }}</a> · {{ task.assigned_group }} · {{ task.get_status_display }}</li>
+    {% empty %}<li class="list-group-item">暂无可查看的任务</li>{% endfor %}
+  </ul>
+</div>
+{% include 'netbox_oa/inc/logs.html' %}
+{% endblock %}

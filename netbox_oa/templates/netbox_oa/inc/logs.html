@@ -1,0 +1,7 @@
+<div class="card">
+  <h2 class="card-header">状态历史</h2>
+  <ul class="list-group list-group-flush">
+    {% for log in logs %}<li class="list-group-item">{{ log.timestamp }} · {{ log.by|default:'系统' }} · {{ log.source_state }} → {{ log.state }} · {{ log.description|default:'' }}</li>
+    {% empty %}<li class="list-group-item">暂无状态转换</li>{% endfor %}
+  </ul>
+</div>

@@ -1,0 +1,20 @@
+{% extends 'generic/object.html' %}
+{% block content %}
+<div class="card mb-3">
+  <h2 class="card-header">{{ object.name }}</h2>
+  <div class="card-body">
+    <p>流程：{{ object.instance }} · 审批组：{{ object.assigned_group }} · 状态：{{ object.get_status_display }}</p>
+    <p>处理人：{{ object.decided_by|default:'—' }} · 处理时间：{{ object.decided_at|default:'—' }}</p>
+    <p>{{ object.comment }}</p>
+    {% if can_act and object.status == 'pending' %}
+    <form method="post">
+      {% csrf_token %}<label for="comment">审批意见</label>
+      <textarea id="comment" name="comment" maxlength="4000" class="form-control mb-2"></textarea>
+      <button class="btn btn-success" type="submit" formaction="{% url 'plugins:netbox_oa:action' kind='task' pk=object.pk operation='approve' %}">通过</button>
+      <button class="btn btn-danger" type="submit" formaction="{% url 'plugins:netbox_oa:action' kind='task' pk=object.pk operation='reject' %}">拒绝</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% include 'netbox_oa/inc/logs.html' %}
+{% endblock %}
