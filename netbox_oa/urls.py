@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from .maintenance_urls import urlpatterns as maintenance_patterns
 
 app_name = "netbox_oa"
 urlpatterns = [
@@ -27,3 +28,4 @@ urlpatterns = [
     path("tasks/<int:pk>/", views.WorkflowTaskView.as_view(), name="workflowtask"),
     path("<str:kind>/<int:pk>/<str:operation>/", views.WorkflowActionView.as_view(), name="action"),
 ]
+urlpatterns += maintenance_patterns

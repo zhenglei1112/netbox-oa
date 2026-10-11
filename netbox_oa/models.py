@@ -1,4 +1,6 @@
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.urls import reverse
@@ -7,6 +9,8 @@ from django_fsm_log.decorators import fsm_log_by, fsm_log_description
 from netbox.models import ChangeLoggedModel
 
 from .choices import TaskStatus, WorkflowStatus
+from .maintenance_flow import MATERIALS, ROLES, STAGES
+from .storage import MaintenanceDocumentStorage
 from .validators import validate_payload, validate_steps
 
 
@@ -39,10 +43,26 @@ class WorkflowDefinition(ChangeLoggedModel):
 
 
 class WorkflowStateModel(ChangeLoggedModel):
-    """Validate protected FSM fields without Django assigning their value again."""
+    """Keep protected FSM states compatible with Django validation and reloads."""
 
     class Meta:
         abstract = True
+
+    def __setattr__(self, name, value):
+        if name == "status" and self.__dict__.get("_refreshing_fsm_state", False):
+            # Database reloads restore persisted state without a transition.
+            # Keep the field's shared protected flag enabled for every instance.
+            self._meta.get_field(name).set_state(self, value)
+            return
+        super().__setattr__(name, value)
+
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        previous = self.__dict__.get("_refreshing_fsm_state", False)
+        self._refreshing_fsm_state = True
+        try:
+            return super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        finally:
+            self._refreshing_fsm_state = previous
 
     def clean_fields(self, exclude=None):
         excluded = set(exclude or ())
@@ -208,3 +228,344 @@ class WorkflowTask(WorkflowStateModel):
     @transition(field=status, source=TaskStatus.PENDING, target=TaskStatus.CANCELLED)
     def cancel(self, *, by, description=""):
         pass
+
+
+class MaintenancePolicy(ChangeLoggedModel):
+    name = models.CharField(max_length=100, unique=True, verbose_name="配置名称")
+    enabled = models.BooleanField(default=True, verbose_name="启用")
+    sla_hours = models.PositiveIntegerField(default=24, verbose_name="节点时限（小时）")
+    warning_hours = models.PositiveIntegerField(default=4, verbose_name="提前提醒（小时）")
+
+    class Meta:
+        verbose_name = "维护流程配置"
+        verbose_name_plural = "维护流程配置"
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_oa:maintenancepolicy", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if not self.sla_hours or self.warning_hours >= self.sla_hours:
+            raise ValidationError("时限必须大于零，提前提醒时间必须小于节点时限。")
+
+
+class MaintenanceRole(ChangeLoggedModel):
+    policy = models.ForeignKey(MaintenancePolicy, on_delete=models.CASCADE, related_name="roles")
+    role = models.CharField(max_length=20, choices=ROLES)
+    group = models.ForeignKey("users.Group", on_delete=models.PROTECT)
+
+    def get_absolute_url(self):
+        return self.policy.get_absolute_url()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("policy", "role"), name="oa_policy_role")]
+        verbose_name = "维护审批角色"
+        verbose_name_plural = "维护审批角色"
+
+
+class MaintenanceOrder(WorkflowStateModel):
+    number = models.CharField(max_length=40, unique=True, verbose_name="工单编号")
+    title = models.CharField(max_length=200, verbose_name="工单标题")
+    policy = models.ForeignKey(MaintenancePolicy, on_delete=models.PROTECT, verbose_name="流程配置")
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="maintenance_requests",
+        verbose_name="发起人",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="maintenance_orders",
+        verbose_name="线路主管",
+    )
+    service_type = models.CharField(
+        max_length=20,
+        choices=(
+            ("fiber", "光缆故障"),
+            ("construction", "施工盯防"),
+            ("air", "空调保养"),
+            ("inspection", "巡检服务"),
+            ("cutover", "割接盯防"),
+            ("power", "供电故障"),
+        ),
+        verbose_name="服务项目",
+    )
+    priority = models.CharField(
+        max_length=10,
+        choices=(("high", "高"), ("medium", "中"), ("low", "低")),
+        default="medium",
+        verbose_name="优先级",
+    )
+    supplier = models.CharField(max_length=200, verbose_name="服务单位")
+    contract_number = models.CharField(max_length=100, verbose_name="合同编号")
+    service_region = models.CharField(max_length=200, verbose_name="服务省市")
+    service_location = models.CharField(max_length=200, verbose_name="服务位置")
+    contact_phone = models.CharField(max_length=40, blank=True, verbose_name="联系电话")
+    requirements = models.TextField(verbose_name="服务要求")
+    fault_reference = models.CharField(max_length=200, blank=True, verbose_name="故障编号")
+    status = FSMField(
+        max_length=20,
+        default="draft",
+        protected=True,
+        choices=(
+            ("draft", "草稿"),
+            ("active", "进行中"),
+            ("completed", "已完成"),
+            ("terminated", "已终止"),
+            ("cancelled", "已撤销"),
+        ),
+        verbose_name="工单状态",
+    )
+    stage = models.CharField(
+        max_length=20, choices=STAGES, default="ordering", verbose_name="当前阶段"
+    )
+    steps_snapshot = models.JSONField(default=list, blank=True)
+    current_position = models.PositiveIntegerField(default=0)
+    warning_hours = models.PositiveIntegerField(default=4)
+    payment_status = models.CharField(
+        max_length=30,
+        default="draft",
+        choices=(
+            ("draft", "未提交"),
+            ("submitted", "付款计划已提交"),
+            ("requested", "付款申请已提交"),
+            ("awaiting_payment", "待财务支付"),
+            ("paid", "已支付"),
+            ("received", "已确认收款"),
+        ),
+        verbose_name="付款状态",
+    )
+    payment_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, verbose_name="付款金额"
+    )
+    period_start = models.DateField(null=True, blank=True, verbose_name="周期开始")
+    period_end = models.DateField(null=True, blank=True, verbose_name="周期结束")
+    completed_at = models.DateTimeField(null=True, blank=True)
+    followers = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name="followed_maintenance_orders"
+    )
+    reserved_groups = models.ManyToManyField("users.Group", through="MaintenanceGroupReservation")
+
+    class Meta:
+        ordering = ("-created", "-pk")
+        verbose_name = "维护服务工单"
+        verbose_name_plural = "维护服务工单"
+
+    def __str__(self):
+        return f"{self.number} {self.title}"
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_oa:maintenanceorder", args=[self.pk])
+
+    def clean(self):
+        super().clean()
+        if self.payment_amount is not None and self.payment_amount <= 0:
+            raise ValidationError("付款金额必须大于零。")
+        if self.period_start and self.period_end and self.period_start > self.period_end:
+            raise ValidationError("周期结束不能早于周期开始。")
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="draft", target="active")
+    def start(self, *, by, description=""):
+        pass
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="active", target="completed")
+    def finish(self, *, by, description=""):
+        pass
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="active", target="terminated")
+    def terminate(self, *, by, description=""):
+        pass
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="draft", target="cancelled")
+    def withdraw(self, *, by, description=""):
+        pass
+
+
+class MaintenanceTask(WorkflowStateModel):
+    order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="tasks")
+    position = models.PositiveIntegerField()
+    name = models.CharField(max_length=200)
+    kind = models.CharField(
+        max_length=20,
+        choices=(
+            ("submission", "填报"),
+            ("approval", "审核"),
+            ("action", "办理"),
+            ("external", "外部流程"),
+            ("countersign", "加签"),
+        ),
+    )
+    assigned_group = models.ForeignKey(
+        "users.Group", on_delete=models.PROTECT, null=True, blank=True
+    )
+    assigned_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="maintenance_tasks",
+    )
+    status = FSMField(
+        max_length=20,
+        default="pending",
+        protected=True,
+        choices=(
+            ("pending", "待处理"),
+            ("completed", "已完成"),
+            ("returned", "已退回"),
+            ("cancelled", "已取消"),
+        ),
+    )
+    deadline = models.DateTimeField()
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="maintenance_decisions",
+    )
+    comment = models.TextField(blank=True)
+    external_reference = models.CharField(max_length=200, blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+    is_countersign = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("pk",)
+        verbose_name = "维护办理任务"
+        verbose_name_plural = "维护办理任务"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("order",),
+                condition=models.Q(status="pending"),
+                name="oa_one_maintenance_pending",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        return self.order.get_absolute_url()
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="pending", target="completed")
+    def complete(self, *, by, description=""):
+        pass
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="pending", target="returned")
+    def send_back(self, *, by, description=""):
+        pass
+
+    @fsm_log_by
+    @fsm_log_description
+    @transition(field=status, source="pending", target="cancelled")
+    def cancel(self, *, by, description=""):
+        pass
+
+
+class MaintenanceGroupReservation(models.Model):
+    _netbox_private = True
+    order = models.ForeignKey(MaintenanceOrder, on_delete=models.CASCADE)
+    group = models.ForeignKey("users.Group", on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("order", "group"), name="oa_order_group")]
+
+
+class MaintenanceDocument(ChangeLoggedModel):
+    order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="documents")
+    material = models.CharField(max_length=20, choices=MATERIALS)
+    version = models.PositiveIntegerField()
+    file = models.FileField(
+        storage=MaintenanceDocumentStorage(), upload_to="maintenance/%Y/%m/", blank=True
+    )
+    kind = models.CharField(
+        max_length=20,
+        default="attachment",
+        choices=(("form", "填写表单"), ("attachment", "上传附件"), ("scan", "扫描件")),
+    )
+    form_data = models.JSONField(default=dict, blank=True)
+    source_document = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="derived_documents"
+    )
+    original_name = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    state = models.CharField(
+        max_length=20,
+        default="electronic",
+        choices=(
+            ("electronic", "电子版"),
+            ("awaiting_paper", "待纸质版"),
+            ("paper", "纸质已签收"),
+            ("sealed", "已签字盖章"),
+        ),
+    )
+    note = models.TextField(blank=True)
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_oa:maintenance_download", args=[self.pk])
+
+    class Meta:
+        ordering = ("material", "-version")
+        verbose_name = "维护工单材料"
+        verbose_name_plural = "维护工单材料"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("order", "material", "version"), name="oa_document_version"
+            )
+        ]
+
+
+class MaintenanceEvent(ChangeLoggedModel):
+    order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="events")
+    task = models.ForeignKey(MaintenanceTask, on_delete=models.PROTECT, null=True, blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    action = models.CharField(max_length=30)
+    description = models.TextField()
+    details = models.JSONField(default=dict, blank=True)
+
+    def get_absolute_url(self):
+        return self.order.get_absolute_url()
+
+    class Meta:
+        ordering = ("-created", "-pk")
+        verbose_name = "维护工单操作记录"
+        verbose_name_plural = "维护工单操作记录"
+
+
+class MaintenanceLink(ChangeLoggedModel):
+    order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="links")
+    object_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
+    object_id = models.PositiveBigIntegerField()
+    object = GenericForeignKey("object_type", "object_id")
+    label = models.CharField(max_length=200)
+
+    def get_absolute_url(self):
+        return self.order.get_absolute_url()
+
+    class Meta:
+        verbose_name = "维护工单关联对象"
+        verbose_name_plural = "维护工单关联对象"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("order", "object_type", "object_id"), name="oa_order_link"
+            )
+        ]

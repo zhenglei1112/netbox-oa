@@ -6,6 +6,7 @@ FSM, FSM logging, database migrations and workflow code remain real.
 
 import sys
 import types
+from pathlib import Path
 
 from django.apps import AppConfig
 
@@ -13,6 +14,9 @@ SECRET_KEY = "local-tests-only"
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
     "tests.support.users.apps.UsersConfig",
     "django_fsm_log",
     "netbox_oa",
@@ -22,6 +26,32 @@ AUTH_USER_MODEL = "users.User"
 AUTHENTICATION_BACKENDS = ["tests.support.backends.TestPermissionBackend"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
+MEDIA_ROOT = str(Path(__file__).resolve().parent.parent / ".tmp" / "media")
+TIME_ZONE = "Asia/Shanghai"
+ROOT_URLCONF = "tests.urls"
+ALLOWED_HOSTS = ["testserver", "localhost"]
+STATIC_URL = "/static/"
+LOGIN_URL = "/login/"
+MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+]
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "APP_DIRS": True,
+        "DIRS": [str(Path(__file__).resolve().parent / "support" / "templates")],
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ]
+        },
+    }
+]
 
 netbox = types.ModuleType("netbox")
 plugins = types.ModuleType("netbox.plugins")
@@ -79,3 +109,7 @@ def _users_getattr(name):
 users_models.__getattr__ = _users_getattr
 sys.modules["users"] = users
 sys.modules["users.models"] = users_models
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"]
+}

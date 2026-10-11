@@ -1,0 +1,22 @@
+.oa-flow {--oa-flow-line:var(--bs-secondary-color,#667085);--oa-flow-back:#d63939}
+.oa-flow-controls[hidden] {display:none!important}
+.oa-flow-controls label {margin-right:12px}
+.oa-flow-controls output {min-width:3.5em;text-align:center}
+.oa-flow-legend {display:flex;gap:18px;flex-wrap:wrap;padding:14px 20px;font-size:.85rem;border-bottom:1px solid var(--bs-border-color,#ddd)}
+.oa-flow-legend .submission {color:#1675d1}.oa-flow-legend .approval {color:#8a50c7}.oa-flow-legend .action {color:#16865a}.oa-flow-legend .external {color:#ad6b13}.oa-flow-return-label {color:var(--oa-flow-back)}
+.oa-flow-viewport {overflow:auto;max-height:75vh;padding:12px;background:var(--bs-body-bg,#fff)}
+.oa-flow-svg {display:block;max-width:none;font-family:inherit}
+.oa-flow-lane {fill:var(--bs-tertiary-bg,#f5f7fa);stroke:var(--bs-border-color,#dce2eb)}
+.oa-flow-stage {font-size:18px;font-weight:600;fill:var(--bs-body-color,#182433)}
+.oa-flow-caption {font-size:13px;fill:var(--bs-secondary-color,#667085)}
+.oa-flow-edge,.oa-flow-back {fill:none;stroke-width:1.8;stroke-linejoin:round}
+.oa-flow-edge {stroke:var(--oa-flow-line)}.oa-flow-arrow {fill:var(--oa-flow-line)}
+.oa-flow-back {stroke:var(--oa-flow-back);stroke-dasharray:5 4;opacity:.7}.oa-flow-back:hover {opacity:1;stroke-width:3}.oa-flow-back-arrow {fill:var(--oa-flow-back)}
+.oa-flow.hide-returns .oa-flow-returns {display:none}
+.oa-flow-node {--oa-node-color:#16865a;cursor:pointer;text-decoration:none}.oa-flow-node.submission {--oa-node-color:#1675d1}.oa-flow-node.approval {--oa-node-color:#8a50c7}.oa-flow-node.external {--oa-node-color:#ad6b13}
+.oa-flow-node rect {fill:var(--bs-body-bg,#fff);stroke:var(--oa-node-color);stroke-width:1.8}
+.oa-flow-node:hover rect,.oa-flow-node:focus rect {stroke-width:3.5}.oa-flow-node:focus {outline:none}
+.oa-flow-name {text-anchor:middle;font-size:14px;fill:var(--bs-body-color,#182433);font-weight:600}
+.oa-flow-number {font-size:11px;fill:var(--oa-node-color)}.oa-flow-role {text-anchor:middle;font-size:12px;fill:var(--bs-secondary-color,#667085)}
+.oa-flow-terminal {text-anchor:middle;font-size:14px;font-weight:600;fill:#16865a}
+tr[id^="flow-node-"] {scroll-margin-top:90px}tr[id^="flow-node-"]:target td {background:rgba(22,117,209,.12)}

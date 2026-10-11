@@ -1,0 +1,42 @@
+{% load static %}
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ document.get_material_display }} {{ data.number }} v{{ document.version }}</title>
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}">
+  <script src="{% static 'netbox_oa/maintenance-print.js' %}" defer></script>
+</head>
+<body>
+<nav class="print-toolbar" aria-label="打印操作"><button id="print-document" type="button">打印 / 另存为 PDF</button><a href="{{ document.order.get_absolute_url }}">返回工单 / 上传扫描件</a><span>表单 v{{ document.version }} · 签字盖章后上传对应扫描件</span></nav>
+<main class="print-sheet {% if document.material == 'report' %}report-sheet{% endif %}">
+  {% if document.material == 'order' %}
+    <h1>中交信通光缆及相关机房环境设备<br>维护服务工单</h1>
+  {% else %}<h1>服务报告</h1>{% endif %}
+  <p class="document-number">单号：{{ data.number }}</p>
+  <table class="document-table"><colgroup><col style="width:17%"><col style="width:33%"><col style="width:17%"><col style="width:33%"></colgroup><tbody>
+    {% if document.material == 'report' %}<tr><th colspan="4" class="section-heading">甲方填写</th></tr>{% endif %}
+    <tr><th>{% if document.material == 'report' %}申请时间{% else %}发起时间{% endif %}</th><td>{{ requested_at }}</td><th>{% if document.material == 'report' %}申请人员{% else %}发起人员{% endif %}</th><td>{{ data.applicant }}</td></tr>
+    {% if document.material == 'order' %}<tr><th>联系电话</th><td colspan="3">{{ data.contact_phone }}</td></tr>{% endif %}
+    <tr><th>合同编号</th><td>{{ data.contract_number }}</td><th>{% if document.material == 'report' %}维护单位{% else %}服务单位{% endif %}</th><td>{{ data.supplier }}</td></tr>
+    <tr><th>服务省市</th><td>{{ data.service_region }}</td><th>服务位置</th><td>{{ data.service_location }}</td></tr>
+    <tr><th>服务项目<br>（单选）</th><td colspan="3">{% for key,label in service_items %}<span class="service-choice">{% if data.service_type == key %}☑{% else %}□{% endif %} {{ label }}</span>{% endfor %}</td></tr>
+    {% if document.material == 'order' %}
+      <tr><th>服务要求</th><td colspan="3" class="requirements">{{ data.requirements|linebreaksbr }}</td></tr>
+      <tr><td colspan="2" class="signature">发起人签字：<br><br>日期：</td><td colspan="2" class="signature">部门审核：<br><br>日期：</td></tr>
+      <tr><td colspan="4" class="signature">甲方：{{ data.company_name }}<br><br>盖章：<br><br>日期：</td></tr>
+    {% else %}
+      <tr><th colspan="4" class="section-heading">乙方填写</th></tr>
+      <tr><th>服务开始时间</th><td class="blank-cell"></td><th>服务结束时间</th><td></td></tr>
+      <tr><th>服务用时</th><td colspan="3" class="blank-cell"></td></tr>
+      <tr><th>服务内容<br>光缆抢修</th><td colspan="3">□道路施工 □交通事故 □光缆整改 □人为破坏 □鼠害 □火灾 □其它：<br>现场情况描述：<br><br>处理过程与方法：熔接：____芯；补缆：____芯____米；跳接：____根____米<br>抢修过程描述：<br><br>※附现场故障照片，须有 GPS 定位信息</td></tr>
+      <tr><th>服务内容<br>盯防服务</th><td colspan="3">班次：____个<br>施工盯防：日报：____份；月报：____份<br>割接盯防：过程说明<br><br>※施工盯防，每日需提供《盯防日报》和每月提供《盯防月报》</td></tr>
+      <tr><th>服务内容<br>空调保养</th><td colspan="3">空调品牌：________ 空调型号：________ 空调数量：________<br>服务内容：<br><br></td></tr>
+      <tr><th>服务内容<br>巡检服务</th><td colspan="3">服务范围：<br>服务距离：____KM<br>※巡检服务，每次需提供《巡检报告》</td></tr>
+      <tr><th>服务内容<br>应急供电</th><td colspan="3">油机发电功耗：________ 班次：________ 小时数：________<br>※附现场照片，须有 GPS 定位信息</td></tr>
+      <tr><th>单次费用核算</th><td colspan="3">人工费用：______元 + 材料费用：______元 − 扣减费用：______元<br>= 费用合计：________元（含税）</td></tr>
+      <tr><td colspan="2" class="signature">维护单位（盖章）：<br><br>维护人员：<br>日期：</td><td colspan="2" class="signature">甲方单位（盖章）：{{ data.company_name }}<br><br>验收人员：<br>日期：</td></tr>
+    {% endif %}
+  </tbody></table>
+  {% if document.material == 'report' %}<p class="attachment-note">※附件：现场故障、处理照片（带定位、时间水印）</p>{% endif %}
+</main>
+</body></html>

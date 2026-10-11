@@ -203,3 +203,27 @@ class WorkflowTests(TestCase):
         instance = self.create()
         with self.assertRaises(AttributeError):
             instance.status = "approved"
+
+    def test_database_refresh_preserves_state_protection(self):
+        instance = self.create()
+        services.submit_instance(pk=instance.pk, actor=self.requester)
+        instance.refresh_from_db()
+        self.assertEqual(instance.status, "pending")
+        task = instance.tasks.get()
+        services.decide_task(pk=task.pk, actor=self.requester, decision="approve")
+        task.refresh_from_db(fields=["status"])
+        self.assertEqual(task.status, "approved")
+        with self.assertRaises(AttributeError):
+            task.status = "pending"
+
+    def test_partial_and_failed_refresh_preserve_state_protection(self):
+        instance = self.create()
+        services.submit_instance(pk=instance.pk, actor=self.requester)
+        instance.refresh_from_db(fields=["title"])
+        self.assertEqual(instance.status, "draft")
+        deferred = WorkflowInstance.objects.only("pk").get(pk=instance.pk)
+        self.assertEqual(deferred.status, "pending")
+        with self.assertRaises(WorkflowInstance.DoesNotExist):
+            instance.refresh_from_db(from_queryset=WorkflowInstance.objects.none())
+        with self.assertRaises(AttributeError):
+            instance.status = "approved"

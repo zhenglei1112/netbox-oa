@@ -2,6 +2,26 @@ from netbox.plugins import PluginMenuItem
 
 menu_items = (
     PluginMenuItem(
+        link="plugins:netbox_oa:maintenance_flow_definition",
+        link_text="维护流程定义",
+        permissions=["netbox_oa.view_maintenanceorder"],
+    ),
+    PluginMenuItem(
+        link="plugins:netbox_oa:maintenance_workbench",
+        link_text="维护服务工单工作台",
+        permissions=["netbox_oa.view_maintenanceorder"],
+    ),
+    PluginMenuItem(
+        link="plugins:netbox_oa:maintenanceorder_add",
+        link_text="发起维护工单",
+        permissions=["netbox_oa.add_maintenanceorder"],
+    ),
+    PluginMenuItem(
+        link="plugins:netbox_oa:maintenancepolicy_add",
+        link_text="维护流程配置",
+        permissions=["netbox_oa.add_maintenancepolicy"],
+    ),
+    PluginMenuItem(
         link="plugins:netbox_oa:workflowdefinition_list",
         link_text="流程定义",
         permissions=["netbox_oa.view_workflowdefinition"],
