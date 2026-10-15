@@ -1,16 +1,16 @@
 {% extends 'base/layout.html' %}
 {% load static %}
-{% block title %}维护流程定义{% endblock %}
+{% block title %}{{ flow_name }}{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
 <script src="{% static 'netbox_oa/flow_definition.js' %}" defer></script>
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-  <div><h1>维护流程定义</h1><p class="text-muted mb-0">4 个阶段 · {{ node_count }} 个顺序节点 · 当前代码定义</p></div>
-  <a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:maintenance_workbench' %}">返回工作台</a>
+  <div><h1>{{ flow_name }}</h1><p class="text-muted mb-0">{{ stage_count }} 个阶段 · {{ node_count }} 个办理环节</p></div>
+  <a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:maintenance_workbench' %}">返回维护服务工单</a>
 </div>
 <div class="alert alert-info">
-  此页面只展示维护工单的当前流程定义。节点顺序和办理规则由代码维护；工单启动时保存流程快照，已有工单不会随定义或角色配置修改而自动改变。
-  EIP 和财务节点由经办人登记外部处理结果。
+  新发起工单按以下流程办理；在途工单的环节与进度以各自审批记录为准。
+  付款申请组依次办理生成付款、付款部门审核、付款；登记外部付款申请后完成 OA 工单，不代表已付款或已收款。
 </div>
 <div class="card mb-3"><div class="card-body">
   <form method="get" class="d-flex align-items-end flex-wrap gap-3">
@@ -28,6 +28,7 @@
   <div class="row">
     {% for role in roles %}<div class="col-md-4 mb-2"><strong>{{ role.name }}</strong>：{% if role.group %}{{ role.group.name }}{% elif policy %}<span class="text-warning">未配置</span>{% else %}<span class="text-muted">选择配置后查看</span>{% endif %}</div>{% endfor %}
     <div class="col-md-4 mb-2"><strong>线路主管</strong>：每张工单指定的负责人</div>
+    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理发起工单、服务报告、服务结算单、生成付款</div>
   </div>
 </div></details>
 <nav class="d-flex flex-wrap gap-2 mb-3" aria-label="流程阶段">
@@ -47,7 +48,7 @@
   <div class="oa-flow-legend"><span class="submission">材料提交</span><span class="approval">内部审批</span><span class="action">办理确认</span><span class="external">外部结果登记</span><span>实线：顺序办理</span><span class="oa-flow-return-label">虚线：退回补正</span></div>
   <div class="oa-flow-viewport" tabindex="0" aria-label="流程图画布，可滚动查看">
     <svg class="oa-flow-svg" xmlns="http://www.w3.org/2000/svg" width="{{ diagram.width }}" height="{{ diagram.height }}" viewBox="0 0 {{ diagram.width }} {{ diagram.height }}" role="img" aria-labelledby="oa-flow-title oa-flow-desc">
-      <title id="oa-flow-title">维护服务工单四阶段流程图</title>
+      <title id="oa-flow-title">{{ flow_name }}流程图</title>
       <desc id="oa-flow-desc">{{ node_count }} 个节点顺序执行。实线指向下一节点，红色虚线指向退回补正节点。节点详情在下方规则表中。</desc>
       <defs>
         <marker id="oa-flow-next" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="oa-flow-arrow"/></marker>
@@ -64,25 +65,25 @@
         {% for line in node.label_lines %}<text class="oa-flow-name" x="{{ node.cx }}" y="{{ line.y }}">{{ line.text }}</text>{% endfor %}
         <text class="oa-flow-role" x="{{ node.cx }}" y="{{ node.role_y }}">{{ node.role_label }}</text>
       </a>{% endfor %}
-      <text class="oa-flow-terminal" x="{{ diagram.end_x }}" y="{{ diagram.end_y }}">已确认收款 · 工单完成</text>
+      <text class="oa-flow-terminal" x="{{ diagram.end_x }}" y="{{ diagram.end_y }}">付款申请已提交 · 工单完成</text>
     </svg>
   </div>
 </section>
 {% for stage in stages %}
 <section class="card mb-3" id="stage-{{ stage.key }}">
-  <div class="card-header"><h2 class="h4 mb-0">{{ forloop.counter }}. {{ stage.name }}</h2></div>
-  <div class="table-responsive"><table class="table table-striped mb-0">
+  <div class="card-header"><div><h2 class="h4 mb-1">{{ forloop.counter }}. {{ stage.name }} · {{ stage.nodes|length }} 个环节</h2><p class="text-muted mb-0">{{ stage.summary }}</p></div></div>
+  <div class="table-responsive"><table class="table table-striped mb-0 oa-flow-rules">
     <thead><tr><th scope="col">顺序 / 节点</th><th scope="col">类型</th><th scope="col">处理角色 / 用户组</th><th scope="col">材料与办理要求</th><th scope="col">退回位置</th><th scope="col">完成结果</th></tr></thead>
     <tbody>{% for node in stage.nodes %}<tr id="flow-node-{{ node.key }}">
       <td><strong>{{ node.position }}. {{ node.name }}</strong></td>
       <td>{{ node.kind_label }}</td>
-      <td>{{ node.role_label }}{% if node.group %}<div class="text-muted">{{ node.group.name }}</div>{% elif node.role != 'owner' and policy %}<div class="text-warning">未配置</div>{% endif %}</td>
+      <td>{{ node.role_label }}{% if node.group %}<div class="text-muted">{{ node.group.name }}</div>{% elif node.role != 'owner' and node.role != 'requester' and policy %}<div class="text-warning">未配置</div>{% endif %}</td>
       <td>{% for material in node.materials %}<div>{{ material }}</div>{% endfor %}{% for rule in node.rules %}<div class="text-muted">{{ rule }}</div>{% endfor %}{% if not node.materials and not node.rules %}办理确认{% endif %}<div class="text-muted">时限：{{ node.sla_hours }} 小时</div></td>
       <td>{% if node.return_label %}{{ node.return_label }}{% else %}不支持退回{% endif %}</td>
-      <td>{% if node.payment_label %}付款状态：{{ node.payment_label }}{% else %}进入下一节点{% endif %}{% if node.kind == 'approval' %}<div class="text-muted">支持加签；加签完成后继续</div>{% endif %}</td>
+      <td>{{ node.completion_label }}{% if node.payment_label %}<div class="text-muted">付款状态：{{ node.payment_label }}</div>{% endif %}{% if node.kind == 'approval' %}<div class="text-muted">支持加签；加签完成后继续</div>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
 </section>
 {% endfor %}
-<div class="alert alert-secondary">退回需填写原因；材料补正节点须上传修订版本。办理人可转办任务；内部审批节点可追加加签。实际付款及收款确认完成后，工单才进入完成状态。</div>
+<div class="alert alert-secondary">退回补正需填写原因。工单表单须修订保存；服务报告和服务结算单须重新上传本次整组扫描原件并重新审批、用印。付款部门审核退回生成付款后，核对合同中的付款信息再提交，无需重传结算单。办理人可转办任务，内部审批支持加签。</div>
 {% endblock %}

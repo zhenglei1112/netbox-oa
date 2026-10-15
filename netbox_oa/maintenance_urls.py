@@ -1,8 +1,34 @@
 from django.urls import path
 
+from . import maintenance_signature_views as signatures
 from . import maintenance_views as views
 
 urlpatterns = [
+    path(
+        "maintenance/tasks/<int:pk>/signature/",
+        signatures.SignatureCreateView.as_view(),
+        name="maintenance_signature_create",
+    ),
+    path(
+        "maintenance/signatures/<int:pk>/",
+        signatures.SignatureView.as_view(),
+        name="maintenance_signature",
+    ),
+    path(
+        "maintenance/signatures/<int:pk>/status/",
+        signatures.SignatureStatusView.as_view(),
+        name="maintenance_signature_status",
+    ),
+    path(
+        "maintenance/signatures/<int:pk>/image/",
+        signatures.SignatureImageView.as_view(),
+        name="maintenance_signature_image",
+    ),
+    path(
+        "maintenance/sign/<str:token>/",
+        signatures.MobileSignatureView.as_view(),
+        name="maintenance_signature_mobile",
+    ),
     path(
         "maintenance/orders/<int:pk>/forms/<str:material>/",
         views.MaintenanceCompanyFormView.as_view(),

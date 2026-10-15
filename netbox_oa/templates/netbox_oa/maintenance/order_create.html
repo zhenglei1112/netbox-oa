@@ -1,0 +1,10 @@
+{% extends 'generic/object_edit.html' %}
+{% load form_helpers %}
+
+{% block title %}添加一个新的维护服务工单{% endblock %}
+
+{% block form %}
+  {% include 'netbox_oa/maintenance/contract_fields.html' %}
+  {% render_errors form %}
+  {{ block.super }}
+{% endblock %}

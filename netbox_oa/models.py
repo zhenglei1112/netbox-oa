@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
@@ -233,6 +235,7 @@ class WorkflowTask(WorkflowStateModel):
 class MaintenancePolicy(ChangeLoggedModel):
     name = models.CharField(max_length=100, unique=True, verbose_name="配置名称")
     enabled = models.BooleanField(default=True, verbose_name="启用")
+    is_default = models.BooleanField(default=False, verbose_name="默认流程配置")
     sla_hours = models.PositiveIntegerField(default=24, verbose_name="节点时限（小时）")
     warning_hours = models.PositiveIntegerField(default=4, verbose_name="提前提醒（小时）")
 
@@ -240,6 +243,13 @@ class MaintenancePolicy(ChangeLoggedModel):
         verbose_name = "维护流程配置"
         verbose_name_plural = "维护流程配置"
         ordering = ("name",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("is_default",),
+                condition=models.Q(is_default=True),
+                name="oa_one_default_maintenance_policy",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -249,6 +259,8 @@ class MaintenancePolicy(ChangeLoggedModel):
 
     def clean(self):
         super().clean()
+        if self.is_default and not self.enabled:
+            raise ValidationError("默认流程配置必须启用。")
         if not self.sla_hours or self.warning_hours >= self.sla_hours:
             raise ValidationError("时限必须大于零，提前提醒时间必须小于节点时限。")
 
@@ -267,9 +279,21 @@ class MaintenanceRole(ChangeLoggedModel):
         verbose_name_plural = "维护审批角色"
 
 
+class MaintenanceNumberSequence(models.Model):
+    _netbox_private = True
+    year = models.PositiveIntegerField(primary_key=True)
+    last_value = models.PositiveIntegerField(default=0)
+
+
+class MaintenanceNumberReservation(models.Model):
+    _netbox_private = True
+    number = models.CharField(max_length=40, primary_key=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    used = models.BooleanField(default=False)
+
+
 class MaintenanceOrder(WorkflowStateModel):
     number = models.CharField(max_length=40, unique=True, verbose_name="工单编号")
-    title = models.CharField(max_length=200, verbose_name="工单标题")
     policy = models.ForeignKey(MaintenancePolicy, on_delete=models.PROTECT, verbose_name="流程配置")
     requester = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -302,8 +326,10 @@ class MaintenanceOrder(WorkflowStateModel):
         verbose_name="优先级",
     )
     supplier = models.CharField(max_length=200, verbose_name="服务单位")
+    contract_id = models.PositiveBigIntegerField(null=True, blank=True, verbose_name="外购合同 ID")
     contract_number = models.CharField(max_length=100, verbose_name="合同编号")
     service_region = models.CharField(max_length=200, verbose_name="服务省市")
+    service_region_ids = models.JSONField(default=list, blank=True, verbose_name="服务地区 ID")
     service_location = models.CharField(max_length=200, verbose_name="服务位置")
     contact_phone = models.CharField(max_length=40, blank=True, verbose_name="联系电话")
     requirements = models.TextField(verbose_name="服务要求")
@@ -345,6 +371,16 @@ class MaintenanceOrder(WorkflowStateModel):
     )
     period_start = models.DateField(null=True, blank=True, verbose_name="周期开始")
     period_end = models.DateField(null=True, blank=True, verbose_name="周期结束")
+    settlement_period_mode = models.CharField(
+        max_length=10,
+        default="day",
+        choices=(("day", "按日"), ("month", "按月")),
+        verbose_name="结算期填写方式",
+    )
+    contract_payment_id = models.PositiveBigIntegerField(
+        null=True, blank=True, verbose_name="外购合同付款 ID"
+    )
+    contract_payment_snapshot = models.JSONField(default=dict, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     followers = models.ManyToManyField(
         settings.AUTH_USER_MODEL, blank=True, related_name="followed_maintenance_orders"
@@ -357,7 +393,7 @@ class MaintenanceOrder(WorkflowStateModel):
         verbose_name_plural = "维护服务工单"
 
     def __str__(self):
-        return f"{self.number} {self.title}"
+        return self.number
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_oa:maintenanceorder", args=[self.pk])
@@ -481,6 +517,19 @@ class MaintenanceTask(WorkflowStateModel):
         pass
 
 
+class MaintenanceSignature(models.Model):
+    _netbox_private = True
+    key = models.UUIDField(default=uuid4, unique=True, editable=False)
+    task = models.ForeignKey(MaintenanceTask, on_delete=models.PROTECT, related_name="signatures")
+    document = models.ForeignKey("MaintenanceDocument", on_delete=models.PROTECT)
+    signer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    expires_at = models.DateTimeField()
+    image = models.BinaryField(default=bytes, blank=True, editable=False)
+    uploaded_at = models.DateTimeField(null=True, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    cancelled = models.BooleanField(default=False)
+
+
 class MaintenanceGroupReservation(models.Model):
     _netbox_private = True
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.CASCADE)
@@ -508,15 +557,18 @@ class MaintenanceDocument(ChangeLoggedModel):
     )
     original_name = models.CharField(max_length=255)
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    uploaded_task = models.ForeignKey(
+        "MaintenanceTask",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="uploaded_documents",
+    )
+    is_sealed = models.BooleanField(default=False, editable=False)
     state = models.CharField(
         max_length=20,
         default="electronic",
-        choices=(
-            ("electronic", "电子版"),
-            ("awaiting_paper", "待纸质版"),
-            ("paper", "纸质已签收"),
-            ("sealed", "已签字盖章"),
-        ),
+        choices=(("electronic", "电子版"), ("scan", "扫描版")),
     )
     note = models.TextField(blank=True)
 

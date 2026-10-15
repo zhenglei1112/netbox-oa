@@ -20,3 +20,13 @@
 .oa-flow-number {font-size:11px;fill:var(--oa-node-color)}.oa-flow-role {text-anchor:middle;font-size:12px;fill:var(--bs-secondary-color,#667085)}
 .oa-flow-terminal {text-anchor:middle;font-size:14px;font-weight:600;fill:#16865a}
 tr[id^="flow-node-"] {scroll-margin-top:90px}tr[id^="flow-node-"]:target td {background:rgba(22,117,209,.12)}
+
+.oa-flow-rules {min-width:1120px;table-layout:fixed}
+.oa-flow-rules th:nth-child(1) {width:18%}
+.oa-flow-rules th:nth-child(2) {width:8%}
+.oa-flow-rules th:nth-child(3) {width:15%}
+.oa-flow-rules th:nth-child(4) {width:30%}
+.oa-flow-rules th:nth-child(5) {width:13%}
+.oa-flow-rules th:nth-child(6) {width:16%}
+.oa-flow-rules td {vertical-align:top;line-height:1.7;overflow-wrap:anywhere}
+.oa-flow-rules td>div+div {margin-top:4px}

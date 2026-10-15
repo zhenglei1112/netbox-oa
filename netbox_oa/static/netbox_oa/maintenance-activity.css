@@ -1,0 +1,79 @@
+/* The activity column responds to the actual workspace width, including NetBox's sidebar. */
+.oa-inbox { container: oa-workbench / inline-size; }
+.oa-inbox.oa-industrial > .oa-columns {
+  display: grid;
+  grid-template-columns: minmax(280px, .75fr) minmax(400px, 1.25fr) 280px;
+  gap: 14px;
+}
+.oa-inbox.oa-industrial .oa-detail { padding: 22px; }
+.oa-current-workspace { padding-top: 22px; }
+.oa-current-workspace > .oa-timeline { margin-top: 12px; }
+.oa-audit { min-width: 0; min-height: 0; overflow: hidden; background: var(--oa-panel-bg); }
+.oa-audit-expanded { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.oa-audit-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 16px 14px; border-bottom: 1px solid var(--oa-border); }
+.oa-audit-header h3 { margin: 3px 0 0; font-size: .88rem; }
+.oa-audit-open { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: var(--oa-muted); border: 1px solid var(--oa-border); border-radius: 4px; text-decoration: none; }
+.oa-audit-open:hover { color: var(--oa-accent); background: var(--oa-soft); }
+.oa-audit-pending { display: flex; gap: 9px; padding: 12px 16px; background: var(--oa-soft); border-bottom: 1px solid var(--oa-border); }
+.oa-audit-pending > span { color: var(--oa-accent); font-size: .65rem; padding-top: 3px; }
+.oa-audit-pending > div { min-width: 0; }
+.oa-audit-pending strong { display: block; font-size: .75rem; font-weight: 500; }
+.oa-audit-pending div > span { display: block; color: var(--oa-muted); font-size: .7rem; margin-top: 4px; overflow-wrap: anywhere; }
+.oa-audit-scroll { padding: 14px 16px; overflow: auto; overscroll-behavior: contain; min-height: 0; flex: 1; }
+.oa-audit-records { list-style: none; padding: 0; margin: 12px 0 0; }
+.oa-audit-record { position: relative; display: flex; gap: 9px; padding: 0 0 19px; }
+.oa-audit-record:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 25px; bottom: 3px; width: 1px; background: var(--oa-border); }
+.oa-audit-symbol { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 23px; height: 23px; border-radius: 5px; background: var(--oa-surface); border: 1px solid var(--oa-border); color: var(--oa-muted); font-size: .74rem; }
+.oa-audit-record-body { min-width: 0; flex: 1; padding-top: 2px; }
+.oa-audit-record-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.oa-audit-record-heading strong { font-size: .76rem; font-weight: 600; }
+.oa-audit-record-heading time { color: var(--oa-muted); font-size: .62rem; white-space: nowrap; }
+.oa-audit-person { color: var(--oa-muted); font-size: .7rem; line-height: 1.6; margin-top: 3px; }
+.oa-audit-person > span { overflow-wrap: anywhere; }
+.oa-audit-comment { font-size: .75rem; line-height: 1.65; margin: 7px 0 0; overflow-wrap: anywhere; }
+.oa-clamp-two { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.oa-audit-description { font-size: .72rem; color: var(--oa-muted); margin-top: 6px; line-height: 1.7; }
+.oa-audit-empty { color: var(--oa-muted); font-size: .78rem; padding: 16px 0; line-height: 1.7; }
+.oa-audit-warning > .oa-audit-symbol, .oa-audit-event-icon.oa-audit-warning { color: var(--bs-warning-text-emphasis, #9a6700); }
+.oa-audit-record:focus { outline: 2px solid var(--oa-accent); outline-offset: 4px; border-radius: 3px; }
+.oa-audit-icons { display: none; flex-direction: column; align-items: center; gap: 12px; padding: 14px 6px; }
+.oa-audit-main-icon, .oa-audit-event-icon, .oa-audit-pending-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 5px; text-decoration: none; color: var(--oa-muted); }
+.oa-audit-main-icon { color: var(--oa-accent); background: var(--oa-soft); border: 1px solid var(--oa-border); margin-bottom: 4px; }
+.oa-audit-event-icon { font-size: .88rem; background: var(--oa-surface); border: 1px solid var(--oa-border); }
+.oa-audit-event-icon:hover { color: var(--oa-accent); border-color: var(--oa-accent); }
+.oa-audit-pending-icon { font-size: .7rem; color: var(--oa-accent); border-bottom: 1px solid var(--oa-border); border-radius: 0; }
+.oa-audit-dialog-scroll .oa-audit-record { padding-bottom: 24px; }
+.oa-audit-dialog-scroll .oa-audit-record-heading strong { font-size: .9rem; }
+.oa-audit-dialog-scroll .oa-audit-comment { font-size: .85rem; }
+@container oa-workbench (max-width: 1239px) {
+  .oa-inbox.oa-industrial > .oa-columns { grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr) 52px; }
+  .oa-audit-expanded { display: none; }
+  .oa-audit-icons { display: flex; }
+}
+@container oa-workbench (max-width: 900px) {
+  .oa-inbox.oa-industrial > .oa-columns { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr) 48px; gap: 10px; }
+}
+@container oa-workbench (max-width: 760px) {
+  .oa-inbox.oa-industrial > .oa-columns { grid-template-columns: minmax(0, 1fr) 48px; height: auto; min-height: 0; gap: 8px; }
+  .oa-inbox .oa-list { grid-column: 1 / -1; }
+  .oa-inbox .oa-detail { grid-column: 1; grid-row: 1; display: none; }
+  .oa-audit { display: none; grid-column: 2; grid-row: 1; align-self: start; position: sticky; top: 12px; }
+  .oa-inbox.oa-show-detail .oa-list { display: none; }
+  .oa-inbox.oa-show-detail .oa-detail, .oa-inbox.oa-show-detail .oa-audit { display: block; }
+  .oa-back { display: inline-block; }
+}
+@media (max-width: 1000px) {
+  .oa-inbox.oa-industrial > .oa-columns { grid-template-columns: minmax(0, 1fr) 48px; height: auto; min-height: 0; gap: 8px; }
+  .oa-inbox .oa-list { grid-column: 1 / -1; }
+  .oa-inbox .oa-detail { grid-column: 1; grid-row: 1; }
+  .oa-audit { display: none; grid-column: 2; grid-row: 1; align-self: start; position: sticky; top: 12px; }
+  .oa-inbox.oa-show-detail .oa-audit { display: block; }
+  .oa-audit-expanded { display: none; }
+  .oa-audit-icons { display: flex; }
+}
+@media (max-width: 450px) {
+  .oa-inbox.oa-industrial .oa-detail { padding: 14px 10px; }
+  .oa-inbox .oa-detail-header { flex-wrap: wrap; }
+  .oa-document-heading { flex-wrap: wrap; }
+  .oa-required-tag { margin-left: 42px; }
+}

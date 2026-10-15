@@ -18,6 +18,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "tests.support.users.apps.UsersConfig",
+    "tests.support.contracts.apps.ContractsConfig",
+    "tests.support.dcim.apps.DCIMConfig",
     "django_fsm_log",
     "netbox_oa",
 ]
@@ -44,6 +46,11 @@ TEMPLATES = [
         "APP_DIRS": True,
         "DIRS": [str(Path(__file__).resolve().parent / "support" / "templates")],
         "OPTIONS": {
+            "libraries": {
+                "form_helpers": "tests.support.form_helpers",
+                "helpers": "tests.support.form_helpers",
+            },
+            "builtins": ["tests.support.form_helpers"],
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",

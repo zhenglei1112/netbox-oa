@@ -3,9 +3,10 @@
 {% block title %}录入{{ title }}{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
+{% include 'netbox_oa/maintenance/contract_fields.html' %}
 <div class="card oa-company-editor">
   <h1>录入{{ title }}</h1>
-  <p>工单编号：{{ order.number }} · 按字段录入信息，保存后自动生成样表格式的打印件。</p>
+  <p>工单编号：{{ order.number }}</p>
   {% if material == 'report' %}<p class="text-muted">这里只填写甲方基础信息。打印表中保留乙方服务内容、费用核算及双方签章栏，乙方完成后上传完整报告。</p>{% endif %}
   <form method="post">{% csrf_token %}{{ form.non_field_errors }}
     <div class="oa-entry-fields">

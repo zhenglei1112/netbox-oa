@@ -1,0 +1,9 @@
+        <dialog class="oa-panel" id="information" aria-labelledby="oa-information-title" {% if panel_id == 'information' %}open{% endif %}>
+  <header class="oa-panel-header"><div><span class="oa-eyebrow">工单资料</span><h2 id="oa-information-title">完整工单信息</h2></div><a data-oa-close href="{{ detail_url }}" class="oa-close" aria-label="关闭工单信息">×</a></header>
+  <div class="oa-panel-body oa-basic"><h3>工单基本信息 {% if detail.can_change and detail.order.status == 'draft' or detail.can_act and detail.current.name == '发起工单' %}<a class="btn btn-sm btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}">修改</a>{% endif %}</h3><dl>
+          <dt>线路主管</dt><dd>{{ detail.order.owner }}</dd><dt>发起人</dt><dd>{{ detail.order.requester }}</dd>
+          <dt>服务省市</dt><dd>{{ detail.order.service_region }}</dd><dt>服务位置</dt><dd>{{ detail.order.service_location }}</dd>
+          <dt>联系电话</dt><dd>{{ detail.order.contact_phone|default:'—' }}</dd>
+          <dt>服务要求</dt><dd>{{ detail.order.requirements }}</dd><dt>付款状态</dt><dd>{{ detail.order.get_payment_status_display }}</dd>
+          <dt>付款金额</dt><dd>{{ detail.order.payment_amount|default_if_none:'—' }}</dd><dt>付款周期</dt><dd>{{ detail.order.period_start|default:'—' }} 至 {{ detail.order.period_end|default:'—' }}</dd>
+        </dl></div></dialog>

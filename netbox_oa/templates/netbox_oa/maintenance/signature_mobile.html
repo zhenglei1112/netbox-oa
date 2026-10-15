@@ -1,0 +1,16 @@
+{% load static %}<!DOCTYPE html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><title>维护服务工单手写签名</title>
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-signature.css' %}">
+</head><body><main>
+<header class="signature-header"><h1>手写签名</h1>{% if not error and not success %}<p>{{ number }} · {{ node }}</p>{% endif %}</header>
+{% if error %}<p role="alert">{{ error }}</p><p>请返回电脑端重新生成二维码。</p>
+{% elif success %}<p>签名已提交。请回到电脑端核对签名并确认审核。</p>
+{% else %}
+<form method="post" data-signature-canvas-form>
+<input type="hidden" name="submission_token" value="{{ submission_token }}">
+<div class="signature-canvas-area"><canvas width="1280" height="720" aria-label="手写签名区域">浏览器不支持手写签名，请更换浏览器。</canvas></div>
+<input type="hidden" name="image_data"><div class="signature-actions"><p data-canvas-error role="alert"></p>
+<button type="button" data-signature-clear>清空重写</button><button type="submit">提交签名</button>
+</div></form>{% endif %}
+</main><script src="{% static 'netbox_oa/maintenance-signature.js' %}" defer></script></body></html>

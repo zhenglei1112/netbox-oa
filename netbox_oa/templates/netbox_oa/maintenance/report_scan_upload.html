@@ -1,0 +1,19 @@
+{% if material.can_upload_scans %}
+<section class="oa-upload-section"><h3>上传扫描版{{ material.name }}</h3><p>必须上传至少一份，可一次选择多份 PDF、PNG、JPEG，每份最大 20 MB。退回补正后请重新上传本次需审批的全部报告。</p>
+  <form method="post" enctype="multipart/form-data" action="{% url 'plugins:netbox_oa:maintenance_upload' pk=detail.order.pk %}">{% csrf_token %}
+    <input type="hidden" name="return_query" value="{{ return_query }}"><input type="hidden" name="return_panel" value="material-{{ material.key }}"><input type="hidden" name="scan_material" value="{{ material.key }}">
+    {{ material.scan_upload_form.file.as_field_group }}{{ material.scan_upload_form.note.as_field_group }}
+    <button class="btn btn-primary" type="submit">上传{{ material.name }}</button>
+  </form>
+</section>
+{% elif material.can_seal_scans %}
+{% for source in material.scan_sources %}
+<section class="oa-upload-section"><h3>上传用印扫描件：{{ source.original_name }}</h3>
+  <form method="post" enctype="multipart/form-data" action="{% url 'plugins:netbox_oa:maintenance_upload' pk=detail.order.pk %}">{% csrf_token %}
+    <input type="hidden" name="return_query" value="{{ return_query }}"><input type="hidden" name="return_panel" value="material-{{ material.key }}"><input type="hidden" name="material" value="{{ material.key }}"><input type="hidden" name="state" value="scan"><input type="hidden" name="source_document_id" value="{{ source.pk }}">
+    <label for="{{ material.key }}-sealed-{{ source.pk }}">对应报告 v{{ source.version }} 的用印扫描件</label><input class="form-control" id="{{ material.key }}-sealed-{{ source.pk }}" type="file" name="file" accept=".pdf,.png,.jpg,.jpeg" required>
+    <button class="btn btn-primary" type="submit">上传用印扫描件</button>
+  </form>
+</section>
+{% endfor %}
+{% else %}<p class="oa-panel-note">审批期间{{ material.name }}保持不变；需要修订时请退回上传{{ material.name }}环节。</p>{% endif %}

@@ -1,0 +1,21 @@
+{% if detail.required_materials and not detail.payment_contract_stage %}
+<div class="oa-stage-materials btn-list">
+  {% for material in detail.materials %}{% if material.required_now %}
+    {% if material.key == 'order' and material.can_fill %}<a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_company_form' pk=detail.order.pk material=material.key %}">填写 / 修订{{ material.name }}</a>{% endif %}
+    {% if material.can_upload_now and perms.netbox_oa.add_maintenancedocument %}
+      <a class="btn btn-outline-primary" data-oa-open="material-{{ material.key }}" data-oa-pane="upload" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=upload">上传{{ material.name }}</a>
+    {% else %}
+      <a class="btn btn-outline-secondary" data-oa-open="material-{{ material.key }}" data-oa-pane="files" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=files">查看{{ material.name }}</a>
+    {% endif %}
+  {% endif %}{% endfor %}
+</div>
+{% endif %}
+        {% if detail.applicant_signature_required %}<p>申请人须完成手写签名后提交工单。修改表单后请重新签名。</p>{% endif %}
+        {% if detail.can_mobile_sign %}{% include 'netbox_oa/maintenance/signature_widget.html' %}{% endif %}
+        {% if detail.current.kind == 'external' %}{{ action_form.external_reference.as_field_group }}{% endif %}
+        {% if detail.settlement_filling %}
+          <p>请在服务结算单资料中上传扫描版服务结算单后提交。</p>
+        {% endif %}
+        {% if detail.payment_contract_stage %}
+          {% if detail.payment_contract_url %}<a class="btn btn-outline-primary" href="{{ detail.payment_contract_url }}">付款信息</a>{% else %}<button class="btn btn-outline-primary" type="button" disabled>付款信息</button><p>{{ detail.payment_contract_error }}</p>{% endif %}
+        {% endif %}

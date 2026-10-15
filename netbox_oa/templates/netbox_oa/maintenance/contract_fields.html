@@ -1,0 +1,5 @@
+{% load static %}
+{% if form.contract_options %}
+{{ form.contract_options|json_script:"oa-contract-options" }}
+<script src="{% static 'netbox_oa/maintenance-contract.js' %}" defer></script>
+{% endif %}

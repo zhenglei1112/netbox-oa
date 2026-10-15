@@ -1,132 +1,80 @@
 {% extends 'base/layout.html' %}
-{% load static %}
-{% block title %}维护服务工单工作台{% endblock %}
+{% load static oa_filters %}
+{% block title %}维护服务工单{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
-<div class="oa-workbench">
-  <div class="oa-heading"><div><h1>维护服务工单工作台</h1><p class="text-muted">跟踪服务交付、材料审核、结算及付款进度</p></div>
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}">
+<div class="oa-workbench oa-inbox oa-industrial {% if mobile_detail %}oa-show-detail{% endif %}" data-detail-url="{{ detail_url }}" data-list-url="{{ list_url }}">
+  <header class="oa-heading">
+    <div><h1>维护服务工单</h1></div>
     <div class="btn-list">
-      {% if perms.netbox_oa.view_maintenanceorder or perms.netbox_oa.view_maintenancepolicy %}<a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:maintenance_flow_definition' %}">流程定义</a>{% endif %}
       {% if perms.netbox_oa.add_maintenanceorder %}<a class="btn btn-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_add' %}">＋ 发起维护服务工单</a>{% endif %}
-      {% if perms.netbox_oa.add_maintenancepolicy %}<a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:maintenancepolicy_add' %}">流程配置</a>{% endif %}
     </div>
-  </div>
-  <div class="oa-stats">
-    <div class="card"><span>待我处理</span><strong>{{ stats.todo }}</strong></div>
-    <div class="card"><span>即将超时 / 已超时</span><strong class="text-warning">{{ stats.warning }} / {{ stats.overdue }}</strong></div>
-    <div class="card"><span>进行中</span><strong>{{ stats.active }}</strong></div>
-    <div class="card"><span>本月完成</span><strong class="text-success">{{ stats.completed }}</strong></div>
-  </div>
+  </header>
+  <div class="oa-feedback" role="status" aria-live="polite">{% for message in messages %}<p>{{ message }}</p>{% endfor %}</div>
   <div class="oa-columns">
     <section class="card oa-list" aria-label="工单列表">
       <nav class="oa-tabs" aria-label="工单范围">
-        <a class="{% if tab == 'todo' %}active{% endif %}" href="?tab=todo">待我处理</a>
-        <a class="{% if tab == 'mine' %}active{% endif %}" href="?tab=mine">我发起的</a>
-        <a class="{% if tab == 'following' %}active{% endif %}" href="?tab=following">我关注的</a>
-        <a class="{% if tab == 'all' %}active{% endif %}" href="?tab=all">全部工单</a>
+        {% for item in tabs %}<a data-oa-nav class="{% if tab == item.key %}active{% endif %}" {% if tab == item.key %}aria-current="page"{% endif %} href="{{ item.url }}">{{ item.label }}</a>{% endfor %}
       </nav>
-      <form method="get" class="oa-filters">
+      <form method="get" action="{% url 'plugins:netbox_oa:maintenance_workbench' %}" class="oa-filters">
         <input type="hidden" name="tab" value="{{ tab }}">
-        <input class="form-control" name="q" value="{{ q }}" placeholder="搜索工单号、标题、服务单位、合同" aria-label="搜索工单">
-        <select name="stage" class="form-select" aria-label="业务阶段"><option value="">全部阶段</option>
-          {% for key,name in stage_choices %}<option value="{{ key }}" {% if stage_filter == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
-        </select>
-        <input class="form-control" name="node" value="{{ node_filter }}" placeholder="当前节点" aria-label="当前节点">
-        <select name="sort" class="form-select" aria-label="排序"><option value="">最新发起</option><option value="waiting" {% if request.GET.sort == 'waiting' %}selected{% endif %}>等待时间</option></select>
-        <button type="submit" class="btn btn-outline-primary">筛选</button>
+        <input type="search" class="form-control" name="q" value="{{ q }}" placeholder="快速搜索工单号、服务单位、合同" aria-label="快速搜索工单" autocomplete="off">
+        <noscript><button type="submit" class="btn btn-outline-primary">搜索</button></noscript>
       </form>
-      <div class="oa-order-list">
+      <div class="oa-order-list" tabindex="-1">
         {% for row in rows %}
-        <a class="oa-order {% if detail.order.pk == row.order.pk %}selected{% endif %}" href="?tab={{ tab }}&amp;stage={{ stage_filter }}&amp;q={{ q|urlencode }}&amp;node={{ node_filter|urlencode }}&amp;selected={{ row.order.pk }}">
-          <div class="oa-order-line"><span class="badge {% if row.order.priority == 'high' %}text-bg-danger{% else %}text-bg-primary{% endif %}">{{ row.order.get_priority_display }}</span><span>{{ row.order.number }}</span><span class="ms-auto {% if row.deadline_state == 'overdue' %}text-danger{% endif %}">{% if row.current %}等待 {{ row.waiting }}{% else %}{{ row.order.get_status_display }}{% endif %}</span></div>
-          <h3>{{ row.order.title }}</h3><p>{{ row.order.get_service_type_display }} · {{ row.order.supplier }} · {{ row.order.service_region }}</p>
-          <div class="oa-mini-stages">{% for stage in row.stages %}<span class="{{ stage.state }}">{{ stage.name }}</span>{% endfor %}</div>
-          {% if row.current %}<small>{{ row.current.name }}{% if row.deadline_state == 'overdue' %} · 已超时{% elif row.deadline_state == 'warning' %} · 即将超时{% endif %}</small>{% endif %}
-        </a>
-        {% empty %}<div class="p-4 text-muted">当前范围暂无工单。可切换到“全部工单”，或发起新的维护工单。</div>{% endfor %}
+        <article class="oa-order {% if detail.order.pk == row.order.pk %}selected{% endif %}" data-order-id="{{ row.order.pk }}">
+          <a class="oa-order-select" data-oa-select href="{{ row.url }}" {% if detail.order.pk == row.order.pk %}aria-current="true"{% endif %}>
+            <div class="oa-order-title"><h2>{{ row.order.number }}</h2><span class="oa-status {% if row.assigned_to_me and row.can_act %}oa-mine{% endif %}">{{ row.status_label }}</span></div>
+            <dl class="oa-order-fields">
+              <dt>发起人：</dt><dd>{{ row.requester_name }} - {{ row.order.created|date:'Y-m-d' }}</dd>
+              <dt>当前阶段：</dt><dd>{{ row.order.get_stage_display }} - {% if row.current %}{{ row.current.name }}{% else %}{{ row.order.get_status_display }}{% endif %}</dd>
+            </dl>
+          </a>
+          {% if row.order.priority == 'high' or row.deadline_state != 'normal' %}<div class="oa-row-alert">{% if row.order.priority == 'high' %}<span>高优先级</span>{% endif %}{% if row.deadline_state == 'overdue' %}<span class="text-danger">已超时 · 等待 {{ row.waiting }}</span>{% elif row.deadline_state == 'warning' %}<span class="text-warning">即将超时</span>{% endif %}</div>{% endif %}
+        </article>
+        {% empty %}<div class="oa-empty">当前范围暂无工单。</div>{% endfor %}
       </div>
-      <div class="p-2 text-muted">共 {{ total }} 条，最多展示前 100 条，请使用筛选缩小范围。</div>
+      <footer class="oa-list-footer">共 {{ total }} 条{% if total > 100 %} · 仅展示前 100 条，可筛选查看更多{% endif %}</footer>
     </section>
-    <section class="card oa-detail" aria-label="工单详情">
-    {% if detail %}
-      <div class="oa-detail-header"><div><h2>{{ detail.order.number }} <span class="badge text-bg-primary">{{ detail.order.get_status_display }}</span></h2><h3>{{ detail.order.title }}</h3><p>{{ detail.order.get_service_type_display }} · 合同：{{ detail.order.contract_number }} · {{ detail.order.supplier }}</p></div>
-        <form method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='follow' %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">{% if detail.following %}取消关注{% else %}关注工单{% endif %}</button></form>
-      </div>
-      <div class="oa-stage-track">{% for stage in detail.stages %}<div class="{{ stage.state }}"><span class="oa-dot">{{ forloop.counter }}</span><strong>{{ stage.name }}</strong><small>{% if stage.state == 'completed' %}已完成{% elif stage.state == 'active' %}当前阶段{% else %}待开始{% endif %}</small></div>{% endfor %}</div>
-      {% if detail.current %}<div class="oa-current"><strong>{{ detail.order.get_stage_display }}</strong> · {{ detail.current.name }} · 等待 {{ detail.waiting }}<br><small>截止：{{ detail.current.deadline|date:'Y-m-d H:i' }} · {% if detail.current.assigned_user %}{{ detail.current.assigned_user }}{% else %}{{ detail.current.assigned_group }}（待领取）{% endif %}</small></div>{% endif %}
-      <div class="oa-info-columns">
-        <div class="oa-nodes"><h3>当前阶段节点</h3>
-          {% for node in detail.nodes %}{% if node.stage == detail.order.stage %}<div class="oa-node {{ node.state }} {% if node.current %}current{% endif %}">
-            <span class="oa-node-dot">{% if node.state == 'completed' %}✓{% else %}○{% endif %}</span>
-            <div>{{ node.name }}{% if node.current %} <strong>（当前节点）</strong>{% endif %}
-              {% if node.task %}<small>{{ node.task.get_status_display }}{% if node.task.completed_at %} · {{ node.task.completed_at|date:'m-d H:i' }}{% endif %}{% if node.task.external_reference %} · {{ node.task.external_reference }}{% endif %}</small>{% endif %}
-            </div>
-          </div>{% endif %}{% endfor %}
-          {% if detail.order.status == 'draft' %}<p>草稿保存完成。确认信息后发起四阶段流程。</p>{% endif %}
-        </div>
-        <div class="oa-basic"><h3>工单基本信息 {% if detail.can_change and detail.order.status == 'draft' or detail.can_act and detail.current.name == '填写并提交维护服务工单' %}<a class="btn btn-sm btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}">修改</a>{% endif %}</h3><dl>
-          <dt>线路主管</dt><dd>{{ detail.order.owner }}</dd><dt>发起人</dt><dd>{{ detail.order.requester }}</dd>
-          <dt>服务省市</dt><dd>{{ detail.order.service_region }}</dd><dt>服务位置</dt><dd>{{ detail.order.service_location }}</dd>
-          <dt>联系电话</dt><dd>{{ detail.order.contact_phone|default:'—' }}</dd><dt>故障编号</dt><dd>{{ detail.order.fault_reference|default:'—' }}</dd>
-          <dt>服务要求</dt><dd>{{ detail.order.requirements }}</dd><dt>付款状态</dt><dd>{{ detail.order.get_payment_status_display }}</dd>
-          <dt>付款金额</dt><dd>{{ detail.order.payment_amount|default_if_none:'—' }}</dd><dt>付款周期</dt><dd>{{ detail.order.period_start|default:'—' }} 至 {{ detail.order.period_end|default:'—' }}</dd>
-        </dl></div>
-      </div>
-      <h3 class="mt-3">公司填写表单</h3>
-      <p class="text-muted">按字段录入信息，保存后自动生成打印件；签字盖章后的扫描件在对应卡片中上传。</p>
-      <div class="oa-materials oa-company-materials">
-        {% for material in detail.company_forms %}<div>
-          <strong>{{ material.name }}{% if material.key == 'report' %}（甲方部分）{% endif %}</strong>
-          {% if material.form_document %}
-            <a href="{% url 'plugins:netbox_oa:maintenance_print' pk=material.form_document.pk %}" target="_blank" rel="noopener">查看 / 打印表单 v{{ material.form_document.version }}</a>
-            <small>已录入 · {{ material.form_document.created|date:'m-d H:i' }}</small>
-            <details><summary>表单版本记录</summary>{% for version in material.form_versions %}<a href="{% url 'plugins:netbox_oa:maintenance_print' pk=version.pk %}" target="_blank" rel="noopener">表单 v{{ version.version }} · {{ version.created|date:'m-d H:i' }}</a>{% endfor %}</details>
-          {% else %}<small>待录入</small>{% endif %}
-          {% if material.can_fill %}<a class="btn btn-sm btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_company_form' pk=detail.order.pk material=material.key %}">{% if material.form_document %}修改信息{% else %}录入信息{% endif %}</a>{% endif %}
-          {% if material.key == 'report' %}<small>乙方服务内容留空，完成报告后在下方“服务报告”附件卡片上传。</small>
-          {% else %}
-            {% for version in material.attachments %}<a href="{% url 'plugins:netbox_oa:maintenance_download' pk=version.pk %}">历史上传附件 v{{ version.version }}</a>{% endfor %}
-            {% include 'netbox_oa/maintenance/material_scans.html' %}
+    <section class="card oa-detail" aria-label="工单详情" tabindex="-1">
+      <a class="oa-back" data-oa-back href="{{ list_url }}">← 返回列表</a>
+      {% if detail %}
+      <header class="oa-detail-header">
+        <div class="oa-detail-summary"><h2>{{ detail.order.number }}</h2><span class="oa-status">{{ detail.order.get_status_display }}</span><p>{{ detail.requester_name }}发起 · {{ detail.order.created|date:'Y-m-d H:i' }}</p></div>
+        <form method="post" data-oa-action action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='follow' %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"><button class="btn btn-sm btn-outline-secondary" type="submit">{% if detail.following %}取消关注{% else %}关注工单{% endif %}</button></form>
+      </header>
+      {% if outside_list %}<p class="oa-notice">该工单不在当前筛选范围。</p>{% endif %}
+      <section class="oa-description" aria-label="事项说明">
+        <h3>事项说明</h3><div class="oa-prose">{{ detail.order.requirements|linebreaksbr }}</div>
+        <p class="oa-metadata">{{ detail.order.get_service_type_display }} · {{ detail.order.supplier }} · 合同 {{ detail.order.contract_number }}<br>{{ detail.order.service_region }} · {{ detail.order.service_location }}</p>
+        <div class="oa-description-toolbar"><a class="oa-text-action" data-oa-open="information" href="{{ detail_url }}&amp;panel=information">完整工单信息 →</a></div>
+        {% include 'netbox_oa/maintenance/inbox_information.html' %}
+        {% include 'netbox_oa/maintenance/inbox_materials.html' %}
+      </section>
+      <section class="oa-current-workspace" aria-label="当前办理">
+        <h3>{% if detail.current %}当前办理{% elif detail.order.status == 'draft' %}发起流程{% else %}办理状态{% endif %}</h3>
+        <ol class="oa-timeline">
+          {% if action_error %}<li class="oa-action-error" role="alert">{{ action_error }}{% if not detail.can_act and action_form.is_bound %}<p>你填写的意见：{{ action_form.comment.value|default:'（未填写）' }}</p>{% endif %}</li>{% endif %}
+          {% if detail.current %}
+          <li class="oa-event oa-current-event" id="oa-current"><span class="oa-avatar" aria-hidden="true">●</span><div class="oa-event-body">
+            {% include 'netbox_oa/maintenance/inbox_actions.html' %}
+          </div></li>
           {% endif %}
-        </div>{% endfor %}
-      </div>
-      <h3 class="mt-3">上传附件</h3>
-      <p class="text-muted">上传乙方提供的报告、结算单及支付材料；发票验真结果由经办人员上传。</p>
-      <div class="oa-materials">
-        {% for material in detail.attachment_materials %}<div>
-          <strong>{{ material.name }}</strong>
-          {% if material.attachment %}<a href="{% url 'plugins:netbox_oa:maintenance_download' pk=material.attachment.pk %}">下载附件 v{{ material.attachment.version }}</a><small>{{ material.attachment.get_state_display }} · {{ material.attachment.created|date:'m-d H:i' }}</small>
-            <details><summary>附件版本记录</summary>{% for version in material.attachments %}<a href="{% url 'plugins:netbox_oa:maintenance_download' pk=version.pk %}">附件 v{{ version.version }} · {{ version.get_state_display }}</a>{% endfor %}</details>
-          {% else %}<small>未上传附件</small>{% endif %}
-          {% if detail.order.status == 'draft' or detail.order.status == 'active' %}
-          {% if perms.netbox_oa.add_maintenancedocument %}
-            <details class="oa-material-upload"><summary>{% if material.attachment %}上传附件新版本{% else %}上传附件{% endif %}</summary>
-              <form method="post" enctype="multipart/form-data" action="{% url 'plugins:netbox_oa:maintenance_upload' pk=detail.order.pk %}">{% csrf_token %}
-                <input type="hidden" name="material" value="{{ material.key }}">
-                {{ material.upload_form.file.as_field_group }}{{ material.upload_form.state.as_field_group }}{{ material.upload_form.note.as_field_group }}
-                <button class="btn btn-sm btn-outline-primary" type="submit">上传附件</button>
-              </form>
-            </details>
-          {% endif %}{% endif %}
-          {% include 'netbox_oa/maintenance/material_scans.html' %}
-        </div>{% endfor %}
-      </div>
-      <details class="oa-section"><summary>操作与审核记录</summary><ol>{% for event in detail.events %}<li>{{ event.created|date:'Y-m-d H:i' }} · {{ event.actor }} · {{ event.description }}<small>{{ event.details.comment|default:'' }}</small></li>{% empty %}<li>暂无可查看记录</li>{% endfor %}</ol></details>
-      {% if detail.order.status == 'draft' and detail.can_change %}<form class="oa-actions" method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='start' %}">{% csrf_token %}<button type="submit" class="btn btn-primary">发起维护流程</button><button type="submit" class="btn btn-outline-secondary" formaction="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='withdraw' %}">撤销草稿</button></form>{% endif %}
-      {% if detail.can_act %}<form class="oa-actions" method="post" action="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='complete' %}">{% csrf_token %}
-        {{ action_form.comment.as_field_group }}
-        {% if detail.current.kind == 'external' %}{{ action_form.external_reference.as_field_group }}{% endif %}
-        {% if detail.current.name == '登记付款计划' %}{{ action_form.payment_amount.as_field_group }}{{ action_form.period_start.as_field_group }}{{ action_form.period_end.as_field_group }}{% endif %}
-        <div class="btn-list mt-2">
-          {% if not detail.current.assigned_user_id %}<button class="btn btn-outline-primary" type="submit" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='claim' %}">领取任务</button>{% endif %}
-          <button class="btn btn-primary" type="submit">{% if detail.current.kind == 'approval' or detail.current.kind == 'countersign' %}审核通过{% elif detail.current.kind == 'submission' %}提交资料{% elif detail.current.kind == 'external' %}登记外部流程已通过{% else %}确认办理完成{% endif %}</button>
-          {% if detail.current.kind == 'approval' or detail.current.kind == 'external' or detail.current.kind == 'countersign' %}<button class="btn btn-outline-warning" type="submit" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='return' %}">退回补正</button>{% endif %}
-        </div>
-        <details class="mt-3"><summary>转办及加签</summary>{{ action_form.user_id.as_field_group }}<div class="btn-list mt-2"><button type="submit" class="btn btn-outline-secondary" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='transfer' %}">转办</button>{% if detail.current.kind == 'approval' %}<button type="submit" class="btn btn-outline-secondary" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='countersign' %}">在本节点之后加签</button>{% endif %}</div></details>
-      </form>{% endif %}
-      {% if request.user.is_superuser and detail.order.status == 'active' %}<details class="oa-section"><summary>终止工单</summary><form method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='terminate' %}">{% csrf_token %}<label>终止原因及已发生费用处理说明<input name="comment" class="form-control" required maxlength="4000"></label><button type="submit" class="btn btn-danger mt-2">确认终止</button></form></details>{% endif %}
-    {% else %}<div class="p-5 text-muted">选择工单查看流程与办理任务。</div>{% endif %}
+          {% if detail.order.status == 'draft' and detail.can_change %}<li class="oa-event oa-current-event"><span class="oa-avatar" aria-hidden="true">○</span><div class="oa-event-body"><h3>确认信息，发起流程</h3><form class="oa-actions" data-oa-action method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='start' %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"><div class="btn-list"><button type="submit" class="btn btn-primary">发起流程</button><button type="submit" class="btn btn-outline-secondary" formaction="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='withdraw' %}">撤销草稿</button></div></form></div></li>{% endif %}
+          {% for node in detail.future_nodes %}{% if forloop.first %}<li class="oa-event oa-future"><span class="oa-avatar" aria-hidden="true">○</span><div class="oa-event-body"><strong>{{ node.label }} · 下一位办理人</strong><p>{{ node.name }}</p></div></li>{% endif %}{% endfor %}
+        </ol>
+        {% if detail.future_nodes|length > 1 %}<a class="oa-text-action oa-future-link" data-oa-open="future" href="{{ detail_url }}&amp;panel=future">查看后续 {{ detail.future_nodes|length }} 个节点 →</a>
+          <dialog class="oa-panel" id="future" aria-labelledby="oa-future-title" {% if panel_id == 'future' %}open{% endif %}><header class="oa-panel-header"><div><span class="oa-eyebrow">{{ detail.order.number }}</span><h2 id="oa-future-title">后续办理节点</h2></div><a data-oa-close class="oa-close" href="{{ detail_url }}" aria-label="关闭后续节点">×</a></header><div class="oa-panel-body"><ol class="oa-process-list">{% for node in detail.future_nodes %}<li><span class="oa-process-symbol">○</span><div><strong>{{ node.name }}</strong><span>{{ node.label }}</span></div></li>{% endfor %}</ol></div></dialog>
+        {% endif %}
+      </section>
+      {% include 'netbox_oa/maintenance/inbox_operation_panels.html' %}
+      {% else %}<div class="oa-empty">选择工单查看进展与办理任务。</div>{% endif %}
     </section>
+    {% include 'netbox_oa/maintenance/inbox_activity.html' %}
   </div>
 </div>
+<script src="{% static 'netbox_oa/maintenance-inbox.js' %}" defer></script>
+<script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}" defer></script>
 {% endblock %}

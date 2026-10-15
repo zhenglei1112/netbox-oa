@@ -13,6 +13,7 @@ class NetBoxOAConfig(PluginConfig):
     max_version = "4.6.99"
     django_apps = ["django_fsm_log"]
     default_auto_field = "django.db.models.BigAutoField"
+    default_settings = {"contract_service_region_field": "ProvincesOfResources"}
 
 
 config = NetBoxOAConfig

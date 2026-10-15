@@ -1,0 +1,14 @@
+{% if detail.payment or detail.payment_error %}
+<section class="oa-document-section" aria-label="引用付款信息">
+  <div class="oa-section-heading"><h3>外购合同付款</h3>{% if detail.payment_url %}<a href="{{ detail.payment_url }}">查看原付款 →</a>{% endif %}</div>
+  {% if detail.payment_error %}<p class="oa-panel-note">{{ detail.payment_error }}</p>{% endif %}
+  {% if detail.payment %}<dl class="oa-basic">
+    <dt>服务工单号</dt><dd>{{ detail.payment.number }}</dd>
+    <dt>日期</dt><dd>{{ detail.payment.date|default:'—' }}</dd>
+    <dt>状态</dt><dd>{{ detail.payment.status_label }}</dd>
+    <dt>起始日期</dt><dd>{{ detail.payment.period_start|default:'—' }}</dd>
+    <dt>结束日期</dt><dd>{{ detail.payment.period_end|default:'—' }}</dd>
+    <dt>周期付款总金额</dt><dd>{{ detail.payment.amount }} {{ detail.payment.currency }}</dd>
+  </dl>{% endif %}
+</section>
+{% endif %}

@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from netbox_oa import maintenance_services as services
+from netbox_oa.maintenance_flow import ROLES
 from netbox_oa.models import (
     MaintenanceDocument,
     MaintenanceOrder,
@@ -20,22 +21,37 @@ class PolicySerializer(ValidatedModelSerializer):
     groups = serializers.SerializerMethodField()
 
     def get_groups(self, obj):
-        return dict(obj.roles.values_list("role", "group_id"))
+        return dict(obj.roles.filter(role__in=dict(ROLES)).values_list("role", "group_id"))
 
     class Meta:
         model = MaintenancePolicy
-        fields = ("id", "url", "name", "enabled", "sla_hours", "warning_hours", "groups")
+        fields = (
+            "id",
+            "url",
+            "name",
+            "enabled",
+            "is_default",
+            "sla_hours",
+            "warning_hours",
+            "groups",
+        )
 
 
 class PolicyWriteSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=100)
     enabled = serializers.BooleanField(default=True)
+    is_default = serializers.BooleanField(required=False)
     sla_hours = serializers.IntegerField(min_value=1, default=24)
     warning_hours = serializers.IntegerField(min_value=0, default=4)
     groups = serializers.DictField(child=serializers.IntegerField(min_value=1))
 
 
 class OrderSerializer(ValidatedModelSerializer):
+    contract_id = serializers.IntegerField(min_value=1)
+    service_region_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False, allow_empty=False
+    )
+
     def validate(self, attrs):
         return attrs
 
@@ -48,7 +64,6 @@ class OrderSerializer(ValidatedModelSerializer):
             "id",
             "url",
             "number",
-            "title",
             "policy",
             "requester",
             "owner",
@@ -56,7 +71,9 @@ class OrderSerializer(ValidatedModelSerializer):
             "priority",
             "supplier",
             "contract_number",
+            "contract_id",
             "service_region",
+            "service_region_ids",
             "service_location",
             "contact_phone",
             "requirements",
@@ -69,12 +86,17 @@ class OrderSerializer(ValidatedModelSerializer):
             "payment_amount",
             "period_start",
             "period_end",
+            "settlement_period_mode",
+            "contract_payment_id",
             "completed_at",
             "created",
             "last_updated",
         )
         read_only_fields = (
             "number",
+            "supplier",
+            "contract_number",
+            "service_region",
             "requester",
             "status",
             "stage",
@@ -84,6 +106,8 @@ class OrderSerializer(ValidatedModelSerializer):
             "payment_amount",
             "period_start",
             "period_end",
+            "settlement_period_mode",
+            "contract_payment_id",
             "completed_at",
         )
 
@@ -121,8 +145,9 @@ class TaskActionSerializer(serializers.Serializer):
     )
     user_id = serializers.IntegerField(min_value=1, required=False)
     payment_amount = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
-    period_start = serializers.DateField(required=False)
-    period_end = serializers.DateField(required=False)
+    period_start = serializers.CharField(required=False)
+    period_end = serializers.CharField(required=False)
+    settlement_period_mode = serializers.ChoiceField(choices=("day", "month"), required=False)
 
 
 class DocumentSerializer(ValidatedModelSerializer):
@@ -138,6 +163,8 @@ class DocumentSerializer(ValidatedModelSerializer):
             "kind",
             "form_data",
             "source_document",
+            "uploaded_task",
+            "is_sealed",
             "uploaded_by",
             "state",
             "note",
@@ -155,6 +182,16 @@ class DocumentWriteSerializer(serializers.Serializer):
     state = serializers.ChoiceField(
         choices=MaintenanceDocument._meta.get_field("state").choices, default="electronic"
     )
+
+    def to_internal_value(self, data):
+        # Accept legacy clients, while exposing only the two current choices.
+        data = data.copy()
+        if "state" in data:
+            data["state"] = {"paper": "scan", "sealed": "scan", "awaiting_paper": "electronic"}.get(
+                data["state"], data["state"]
+            )
+        return super().to_internal_value(data)
+
     file = serializers.FileField()
     note = serializers.CharField(required=False, allow_blank=True, default="")
 
@@ -249,7 +286,7 @@ class OrderViewSet(TransitionViewMixin, NetBoxModelViewSet):
 class TaskViewSet(TransitionViewMixin, NetBoxReadOnlyModelViewSet):
     queryset = MaintenanceTask.objects.select_related("order", "assigned_user", "assigned_group")
     serializer_class = TaskSerializer
-    transition_actions = ("complete", "send_back", "claim", "transfer", "countersign")
+    transition_actions = ("complete", "send_back", "transfer", "countersign")
     filterset_fields = ("order_id", "status", "kind", "assigned_user_id", "assigned_group_id")
 
     def get_queryset(self):
@@ -270,9 +307,9 @@ class TaskViewSet(TransitionViewMixin, NetBoxReadOnlyModelViewSet):
                 "payment_amount",
                 "period_start",
                 "period_end",
+                "settlement_period_mode",
             ),
             "return": ("comment",),
-            "claim": (),
             "transfer": ("user_id", "comment"),
             "countersign": ("user_id", "comment"),
         }[operation]
@@ -282,7 +319,6 @@ class TaskViewSet(TransitionViewMixin, NetBoxReadOnlyModelViewSet):
         handlers = {
             "complete": services.complete_task,
             "return": services.return_task,
-            "claim": services.claim_task,
             "transfer": services.transfer_task,
             "countersign": services.countersign_task,
         }
@@ -299,10 +335,6 @@ class TaskViewSet(TransitionViewMixin, NetBoxReadOnlyModelViewSet):
     @action(detail=True, methods=["post"], url_path="return")
     def send_back(self, request, pk=None):
         return self.mutate(request, "return")
-
-    @action(detail=True, methods=["post"])
-    def claim(self, request, pk=None):
-        return self.mutate(request, "claim")
 
     @action(detail=True, methods=["post"])
     def transfer(self, request, pk=None):

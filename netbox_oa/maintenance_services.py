@@ -6,17 +6,20 @@ from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
 from users.models import Group
 
-from .maintenance_flow import MATERIALS, ROLES, build_steps
-from .maintenance_materials import COMPANY_FORMS, ORDER_FORM_FIELDS
+from .maintenance_contracts import region_ids_from_names, selected_contract
+from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES, build_steps
+from .maintenance_materials import COMPANY_FORMS, ORDER_FORM_FIELDS, company_form_initial
+from .maintenance_numbering import issue_number, number_from_token
 from .models import (
     MaintenanceDocument,
     MaintenanceEvent,
     MaintenanceLink,
+    MaintenanceNumberReservation,
     MaintenanceOrder,
     MaintenancePolicy,
     MaintenanceRole,
@@ -72,9 +75,12 @@ def _new_task(order):
         position=order.current_position,
         name=node["name"],
         kind=node["kind"],
-        assigned_group_id=node.get("group_id"),
-        assigned_user_id=node.get("user_id")
-        or (order.owner_id if node["role"] == "owner" else None),
+        assigned_group_id=None if node["role"] == "requester" else node.get("group_id"),
+        assigned_user_id=(
+            order.requester_id
+            if node["role"] == "requester"
+            else node.get("user_id") or (order.owner_id if node["role"] == "owner" else None)
+        ),
         deadline=timezone.now() + timedelta(hours=node["sla_hours"]),
         is_countersign=node["kind"] == "countersign",
     )
@@ -82,8 +88,27 @@ def _new_task(order):
     return task
 
 
+def _begin_task(task, actor):
+    """Bind a shared group task when its first successful work operation is saved."""
+    _snapshot(task)
+    if not task.assigned_user_id:
+        task.assigned_user = actor
+    if not task.started_at:
+        task.started_at = timezone.now()
+    _save(task)
+
+
 @transaction.atomic
-def save_policy(*, actor, name, groups, sla_hours=24, warning_hours=4, enabled=True, pk=None):
+def save_policy(
+    *, actor, name, groups, sla_hours=24, warning_hours=4, enabled=True, is_default=None, pk=None
+):
+    if is_default and not enabled:
+        raise ValidationError("默认流程配置必须启用。")
+    previous_defaults = (
+        list(MaintenancePolicy.objects.select_for_update().filter(is_default=True).order_by("pk"))
+        if is_default
+        else []
+    )
     if pk:
         _allowed(MaintenancePolicy, actor, "change", pk)
         policy = MaintenancePolicy.objects.select_for_update().get(pk=pk)
@@ -92,13 +117,25 @@ def save_policy(*, actor, name, groups, sla_hours=24, warning_hours=4, enabled=T
         _require_actor(actor, MaintenancePolicy, "add")
         policy = MaintenancePolicy()
     if set(groups) != {role for role, _ in ROLES}:
-        raise ValidationError("请配置全部七种经办角色。")
+        raise ValidationError("请配置全部六种经办角色。")
     ids = set(groups.values())
     if len(list(Group.objects.select_for_update().filter(pk__in=ids))) != len(ids):
         raise ValidationError("经办组不存在。")
     policy.name, policy.sla_hours, policy.warning_hours = name, sla_hours, warning_hours
     policy.enabled = enabled
-    _save(policy)
+    if is_default is not None:
+        policy.is_default = is_default
+    for previous in previous_defaults:
+        if previous.pk == policy.pk:
+            continue
+        _allowed(MaintenancePolicy, actor, "change", previous.pk)
+        _snapshot(previous)
+        previous.is_default = False
+        _save(previous)
+    try:
+        _save(policy)
+    except IntegrityError as exc:
+        raise ValidationError("流程配置已发生变化，请刷新页面后重试。") from exc
     if (
         not MaintenancePolicy.objects.restrict(actor, "change" if pk else "add")
         .filter(pk=policy.pk)
@@ -113,24 +150,42 @@ def save_policy(*, actor, name, groups, sla_hours=24, warning_hours=4, enabled=T
 
 
 @transaction.atomic
-def create_order(*, actor, policy, **data):
+def create_order(*, actor, policy, number_token=None, **data):
     _require_actor(actor, MaintenanceOrder, "add")
     _allowed(MaintenancePolicy, actor, "view", policy.pk)
     policy = MaintenancePolicy.objects.select_for_update().get(pk=policy.pk)
     if not policy.enabled:
         raise ValidationError("流程配置已停用。")
     owner = data.pop("owner", None) or actor
+    if owner.pk != actor.pk:
+        raise ValidationError("请由线路主管本人发起工单。")
     if not owner.is_active:
         raise ValidationError("线路主管账号未启用。")
-    order = MaintenanceOrder(
-        policy=policy, requester=actor, owner=owner, number=uuid4().hex, **data
+    if "number" in data:
+        raise ValidationError("工单号由系统自动生成，不能人工指定。")
+    data.update(
+        selected_contract(
+            actor,
+            data.get("contract_id"),
+            data.get("service_region"),
+            data.get("service_region_ids"),
+        )
     )
+    if "title" in data:
+        raise ValidationError("工单仅使用自动生成的编号，不再填写工单名称。")
+    number = (
+        number_from_token(number_token, actor, lock=True)
+        if number_token
+        else issue_number(actor)[0]
+    )
+    order = MaintenanceOrder(policy=policy, requester=actor, owner=owner, number=number, **data)
     _save(order)
-    order.number = f"GD-{timezone.localdate().year}-{order.pk:06d}"
-    _save(order)
+    MaintenanceNumberReservation.objects.filter(number=number, actor=actor).update(used=True)
     if not MaintenanceOrder.objects.restrict(actor, "add").filter(pk=order.pk).exists():
         raise PermissionDenied("新工单不符合新增权限约束。")
     _event(order, actor, "create", "创建维护服务工单")
+    _require_actor(actor, MaintenanceDocument, "add")
+    _create_company_document(order, actor, "order", company_form_initial(order))
     return order
 
 
@@ -150,12 +205,13 @@ def update_order(*, pk, actor, **data):
     else:
         raise ValidationError("工单已结束，不能修改。")
     allowed = {
-        "title",
         "service_type",
         "priority",
         "supplier",
         "contract_number",
+        "contract_id",
         "service_region",
+        "service_region_ids",
         "service_location",
         "contact_phone",
         "requirements",
@@ -163,6 +219,23 @@ def update_order(*, pk, actor, **data):
     }
     if set(data) - allowed:
         raise ValidationError("只能修改工单业务信息。")
+    if set(data) & {
+        "contract_id",
+        "contract_number",
+        "supplier",
+        "service_region",
+        "service_region_ids",
+    }:
+        contract_id = data.get("contract_id", order.contract_id)
+        region = data.get("service_region")
+        region_ids = data.get("service_region_ids")
+        if (
+            not {"service_region", "service_region_ids"} & set(data)
+            and contract_id == order.contract_id
+        ):
+            region = order.service_region
+            region_ids = order.service_region_ids or None
+        data.update(selected_contract(actor, contract_id, region, region_ids))
     for key, value in data.items():
         setattr(order, key, value)
     _save(order)
@@ -182,11 +255,12 @@ def start_order(*, pk, actor):
     order = _order(pk, actor)
     if order.owner_id != actor.pk and order.requester_id != actor.pk and not actor.is_superuser:
         raise PermissionDenied("只有申请人或线路主管可以发起流程。")
+    selected_contract(actor, order.contract_id)
     policy = MaintenancePolicy.objects.select_for_update().get(pk=order.policy_id)
     if not policy.enabled:
         raise ValidationError("流程配置已停用。")
     policy.full_clean()
-    groups = dict(policy.roles.values_list("role", "group_id"))
+    groups = dict(policy.roles.filter(role__in=dict(ROLES)).values_list("role", "group_id"))
     if set(groups) != {role for role, _ in ROLES}:
         raise ValidationError("请先配置全部经办角色。")
     ids = set(groups.values())
@@ -194,28 +268,73 @@ def start_order(*, pk, actor):
         raise ValidationError("经办组不存在。")
     order.steps_snapshot = build_steps(groups, policy.sla_hours)
     order.warning_hours = policy.warning_hours
-    _transition(order, "start", actor, "发起维护流程")
+    _transition(order, "start", actor, f"发起{FLOW_NAME}")
     _save(order)
     order.reserved_groups.add(*ids)
     _new_task(order)
-    _event(order, actor, "start", "发起四阶段维护流程")
+    _event(order, actor, "start", f"发起{FLOW_NAME}")
     return order
 
 
+def report_scan_sources(order):
+    """The current submission's complete set of scanned reports."""
+    return material_scan_sources(order, "report")
+
+
+def material_scan_sources(order, material):
+    fill_positions = [
+        i for i, node in enumerate(order.steps_snapshot) if node["key"] == f"{material}_fill"
+    ]
+    if not fill_positions:
+        return order.documents.none()
+    submission = order.tasks.filter(position=fill_positions[0]).order_by("-pk").first()
+    scans = order.documents.filter(material=material, kind="scan", source_document__isnull=True)
+    if not submission:
+        return scans.none()
+    if submission.status == "completed":
+        return scans.filter(pk__in=submission.evidence.get(material, []))
+    baseline = submission.evidence.get("correction_baseline", {}).get(material, 0)
+    return scans.filter(version__gt=baseline)
+
+
 def _materials(order, node):
+    scan_material = "report" if node.get("report_scans") else node.get("scan_material")
+    if scan_material:
+        label = dict(MATERIALS)[scan_material]
+        scans = list(material_scan_sources(order, scan_material))
+        if not scans or any(not scan.file for scan in scans):
+            raise ValidationError(
+                f"请至少上传一份扫描版{label}；甲方表单和电子附件不能替代乙方报告。"
+            )
+        if any(state == "sealed" for _, state in node["required"]):
+            sealed = []
+            for scan in scans:
+                stamped = scan.derived_documents.filter(kind="scan", is_sealed=True).first()
+                if not stamped or not stamped.file:
+                    raise ValidationError(
+                        f"请上传每份{label}的用印扫描件，尚缺：{scan.original_name}。"
+                    )
+                sealed.append(stamped.pk)
+            return {scan_material: sealed}
+        return {scan_material: [scan.pk for scan in scans]}
     ids = {}
     for material, state in node["required"]:
         document = order.documents.filter(material=material).order_by("-version").first()
-        rank = {"electronic": 0, "awaiting_paper": 0, "paper": 1, "sealed": 2}
+        rank = {"electronic": 0, "awaiting_paper": 0, "scan": 1, "paper": 1, "sealed": 2}
         if document and document.kind == "form" and material == "report":
             raise ValidationError("服务报告甲方表单不能替代乙方报告，请上传乙方完成的服务报告。")
-        if not document or rank[document.state] < rank[state]:
+        if not document or (2 if document.is_sealed else rank[document.state]) < rank[state]:
             label = dict(MATERIALS)[material]
             if material == "order" and state == "electronic":
                 raise ValidationError("请先填写并保存维护服务工单表单。")
-            raise ValidationError(
-                f"请上传当前版本的{label}，材料状态至少为{dict(MaintenanceDocument._meta.get_field('state').choices)[state]}。"
+            required_label = (
+                "用印后扫描版"
+                if state == "sealed"
+                else "扫描版"
+                if state in {"paper", "scan"}
+                else "电子版"
             )
+            raise ValidationError(f"请上传当前版本的{label}，材料状态至少为{required_label}。")
         ids[material] = document.pk
     return ids
 
@@ -235,6 +354,7 @@ def complete_task(
     payment_amount=None,
     period_start=None,
     period_end=None,
+    settlement_period_mode="day",
 ):
     _comment(comment)
     order, task = _task(pk, actor)
@@ -242,31 +362,46 @@ def complete_task(
     evidence = _materials(order, node)
     for material, baseline in task.evidence.get("correction_baseline", {}).items():
         latest = order.documents.filter(material=material).order_by("-version").first()
-        revised = latest.source_document if latest and latest.kind == "scan" else latest
+        revised = (
+            latest.source_document
+            if latest and latest.kind == "scan" and latest.source_document_id
+            else latest
+        )
         if not revised or revised.version <= baseline:
             raise ValidationError("退回补正后必须保存修订表单或上传修订附件，不能直接提交原材料。")
     if task.kind == "external" and not external_reference.strip():
         raise ValidationError("外部流程节点必须登记 EIP 或财务业务单号。")
     if len(external_reference) > 200:
         raise ValidationError("外部单号不能超过 200 字符。")
-    if node["key"] == "payment_plan":
-        if payment_amount is None or period_start is None or period_end is None:
-            raise ValidationError("请填写付款金额及周期起止日期。")
-        order.payment_amount, order.period_start, order.period_end = (
-            payment_amount,
-            period_start,
-            period_end,
-        )
-        order.full_clean()
+    if node.get("contract_payment") and node["key"] == "settlement_fill":
+        order.period_start, order.period_end = None, None
+        order.contract_payment_id = None
+        order.contract_payment_snapshot = {}
+        order.payment_amount = None
     if node["key"] in {"paid", "receipt", "issue", "finance_handover"}:
         _comment(comment, required=True)
     if node["key"].endswith("_mail"):
         _comment(comment, required=True)
     if node["key"] == "receipt" and order.payment_status != "paid":
         raise ValidationError("必须先确认实际付款。")
+    handwritten = None
+    if node["key"] in {"order_fill", "order_review", "order_final"}:
+        from .maintenance_signatures import signature_for_approval
+
+        handwritten = signature_for_approval(task, actor, required=node["key"] == "order_fill")
+    _begin_task(task, actor)
     _transition(task, "complete", actor, comment)
     task.decided_by, task.completed_at, task.comment = actor, timezone.now(), comment
-    task.external_reference, task.evidence = external_reference, evidence
+    task.external_reference, task.evidence = external_reference, dict(evidence)
+    if node["key"] in {"order_fill", "order_review", "order_final"}:
+        signer = handwritten.signer if handwritten else actor
+        task.evidence["signature"] = {
+            "name": signer.get_full_name() or signer.get_username(),
+            "user_id": signer.pk,
+            "date": timezone.localdate(task.completed_at).isoformat(),
+        }
+        if handwritten:
+            task.evidence["signature"]["image_id"] = handwritten.pk
     _save(task)
     if node["payment"]:
         order.payment_status = node["payment"]
@@ -281,7 +416,7 @@ def complete_task(
         comment=comment,
     )
     if task.position + 1 == len(order.steps_snapshot):
-        if order.payment_status != "received":
+        if not node.get("finish_on_application") and order.payment_status != "received":
             raise ValidationError("确认收款后才能结束工单。")
         _transition(order, "finish", actor, comment)
         order.completed_at = timezone.now()
@@ -302,20 +437,30 @@ def return_task(*, pk, actor, comment):
     if not key or task.kind not in {"approval", "external", "countersign"}:
         raise ValidationError("当前节点不支持退回补正。")
     target = next(i for i, step in enumerate(order.steps_snapshot) if step["key"] == key)
+    _begin_task(task, actor)
     _transition(task, "send_back", actor, comment)
+    task.signatures.filter(cancelled=False).update(cancelled=True)
     task.completed_at, task.decided_by, task.comment = timezone.now(), actor, comment
     _save(task)
     order.current_position = target
     order.stage = order.steps_snapshot[target]["stage"]
     # Earlier payment approvals are invalidated when their supporting materials change.
-    order.payment_status = "draft" if order.stage != "payment" else "submitted"
+    order.payment_status = (
+        "draft" if key == "payment_plan" or order.stage != "payment" else "submitted"
+    )
     _save(order)
     correction = _new_task(order)
+    target_node = order.steps_snapshot[target]
+    required_revisions = (
+        []
+        if target_node.get("contract_payment") and key == "payment_plan"
+        else target_node["required"]
+    )
     correction.evidence = {
         "correction_baseline": {
             material: order.documents.filter(material=material).aggregate(n=Max("version"))["n"]
             or 0
-            for material, _ in order.steps_snapshot[target]["required"]
+            for material, _ in required_revisions
         }
     }
     _save(correction)
@@ -327,17 +472,6 @@ def return_task(*, pk, actor, comment):
         task,
         comment=comment,
     )
-    return task
-
-
-@transaction.atomic
-def claim_task(*, pk, actor):
-    order, task = _task(pk, actor)
-    if task.assigned_user_id:
-        raise ValidationError("任务已经领取或指定处理人。")
-    task.assigned_user, task.started_at = actor, timezone.now()
-    _save(task)
-    _event(order, actor, "claim", "领取任务", task)
     return task
 
 
@@ -362,6 +496,7 @@ def transfer_task(*, pk, actor, user_id, comment):
         raise ValidationError("只能转办给原经办组内的人员。")
     previous = task.assigned_user_id
     task.assigned_user = target
+    task.signatures.filter(cancelled=False).update(cancelled=True)
     _save(task)
     _allowed(MaintenanceTask, target, "change", task.pk)
     _event(
@@ -405,6 +540,7 @@ def countersign_task(*, pk, actor, user_id, comment):
     current["payment"] = ""
     order.steps_snapshot.insert(task.position + 1, step)
     _save(order)
+    _begin_task(task, actor)
     _event(
         order, actor, "countersign", "追加审核节点", task, target_user=target.pk, comment=comment
     )
@@ -473,6 +609,12 @@ def check_company_form_access(order, actor, material):
 
 
 def _create_company_document(order, actor, material, data):
+    if material == "order":
+        data = {
+            **data,
+            "signature": "",
+            "signature_date": "",
+        }
     version = (order.documents.filter(material=material).aggregate(n=Max("version"))["n"] or 0) + 1
     document = MaintenanceDocument(
         order=order,
@@ -504,16 +646,30 @@ def save_company_form(*, pk, actor, material, data):
 
     order = _order(pk, actor)
     check_company_form_access(order, actor, material)
-    form = MaintenanceCompanyForm(data, material=material)
+    if (
+        material == "order"
+        and isinstance(data, dict)
+        and not hasattr(data, "getlist")
+        and isinstance(data.get("service_region"), str)
+    ):
+        data = {**data, "service_region": region_ids_from_names(actor, data["service_region"])}
+    form = MaintenanceCompanyForm(data, material=material, actor=actor)
     if not form.is_valid():
         raise ValidationError(form.errors.as_text())
     values = dict(form.cleaned_data)
     values["requested_at"] = values["requested_at"].isoformat()
     if material == "order":
+        values["signature_date"] = (
+            values["signature_date"].isoformat() if values.get("signature_date") else ""
+        )
+    if material == "order":
         for key in ORDER_FORM_FIELDS:
             setattr(order, key, values[key])
         _save(order)
         _allowed(MaintenanceOrder, actor, "change", order.pk)
+        current = order.tasks.filter(status="pending").first()
+        if current:
+            _begin_task(current, actor)
     return _create_company_document(order, actor, material, values)
 
 
@@ -521,6 +677,8 @@ def save_company_form(*, pk, actor, material, data):
 def upload_document(
     *, pk, actor, material, file, state="electronic", note="", source_document_id=None
 ):
+    legacy_sealed = state == "sealed"
+    state = {"paper": "scan", "sealed": "scan", "awaiting_paper": "electronic"}.get(state, state)
     # Uploading may be performed by the owner or the actor of the current task.
     _allowed(MaintenanceOrder, actor, "view", pk)
     _require_actor(actor, MaintenanceDocument, "add")
@@ -539,7 +697,11 @@ def upload_document(
         if material not in stage_material[order.stage]:
             raise ValidationError("只能提交当前阶段的材料，已完成阶段的材料保持不变。")
         # A revised electronic source must go back through review; later nodes only accept scans.
-        if current.kind not in {"submission"} and state in {"electronic", "awaiting_paper"}:
+        if (
+            current.kind != "submission"
+            and not node.get("finish_on_application")
+            and state in {"electronic", "awaiting_paper"}
+        ):
             if material != "verification" or node["key"] != "invoice_check":
                 raise ValidationError(
                     "修改电子版内容请先退回填报节点；当前节点仅可补充纸质或盖章版。"
@@ -550,20 +712,54 @@ def upload_document(
         _allowed(MaintenanceTask, actor, "change", current.pk)
     else:
         _allowed(MaintenanceOrder, actor, "change", pk)
-    scan = state in {"paper", "sealed"}
+    scan = state == "scan"
+    # Only the handling step can identify a new scan as a stamping result.
+    is_sealed = bool(
+        scan
+        and current
+        and (
+            node["key"] == f"{material}_seal"
+            or (
+                current.kind == "action"
+                and (material, "sealed") in [tuple(item) for item in node.get("required", [])]
+            )
+        )
+    )
     if material == "order" and not scan:
         raise ValidationError("维护服务工单请在公司表单中填写生成，只能上传纸质或盖章扫描件。")
     source = order.documents.filter(material=material).exclude(kind="scan").first()
-    if scan:
+    standalone_material = (
+        "report"
+        if current and node.get("report_scans")
+        else node.get("scan_material")
+        if current
+        else None
+    )
+    if standalone_material and material == standalone_material:
+        label = dict(MATERIALS)[material]
+        if not scan:
+            raise ValidationError(f"{label}必须上传 PDF、PNG 或 JPEG 扫描件。")
+        if node["key"] == f"{material}_fill":
+            if source_document_id or legacy_sealed:
+                raise ValidationError(f"上传{label}时请提交扫描版原件，无需关联电子附件。")
+            source = None
+        elif node["key"] == f"{material}_seal" and is_sealed:
+            source = material_scan_sources(order, material).filter(pk=source_document_id).first()
+            if not source:
+                raise ValidationError(f"用印扫描件必须对应本次审批的{label}。")
+            _allowed(MaintenanceDocument, actor, "view", source.pk)
+        else:
+            raise ValidationError(f"审批期间不能修改{label}，请先退回{label}填写环节。")
+    elif scan:
         if not source or (material == "report" and source.kind == "form"):
             raise ValidationError("请先生成公司表单或上传乙方电子附件，再上传对应扫描件。")
         if source_document_id != source.pk:
             raise ValidationError("扫描件必须对应当前表单或附件版本，请刷新后重新选择。")
         _allowed(MaintenanceDocument, actor, "view", source.pk)
-        if Path(file.name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg"}:
-            raise ValidationError("扫描件仅支持 PDF、PNG 和 JPEG。")
     elif source_document_id:
         raise ValidationError("电子附件不能指定扫描来源版本。")
+    if scan and Path(file.name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg"}:
+        raise ValidationError("扫描件仅支持 PDF、PNG 和 JPEG。")
     if Path(file.name).suffix.lower() not in {".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg"}:
         raise ValidationError("支持 PDF、DOCX、XLSX、PNG 和 JPEG 材料。")
     if file.size > 20 * 1024 * 1024:
@@ -579,9 +775,14 @@ def upload_document(
         state=state,
         note=note,
         kind="scan" if scan else "attachment",
+        is_sealed=is_sealed,
+        uploaded_task=current,
         source_document=source if scan else None,
     )
     document.full_clean()
+    if current and task_is_assigned(current, actor):
+        if MaintenanceTask.objects.restrict(actor, "change").filter(pk=current.pk).exists():
+            _begin_task(current, actor)
     document.save()
     try:
         _allowed(MaintenanceDocument, actor, "add", document.pk)
@@ -600,6 +801,36 @@ def upload_document(
         document.file.delete(save=False)
         raise
     return document
+
+
+def upload_report_scans(*, pk, actor, files, note=""):
+    return upload_material_scans(pk=pk, actor=actor, files=files, note=note, material="report")
+
+
+def upload_material_scans(*, pk, actor, files, material, note=""):
+    """Save a submission batch atomically, including cleanup of stored files on failure."""
+    if not files:
+        raise ValidationError("请至少上传一份扫描版材料。")
+    saved = []
+    try:
+        with transaction.atomic():
+            _allowed(MaintenanceOrder, actor, "view", pk)
+            order = MaintenanceOrder.objects.select_for_update().get(pk=pk)
+            node = order.steps_snapshot[order.current_position] if order.steps_snapshot else {}
+            scan_material = "report" if node.get("report_scans") else node.get("scan_material")
+            if scan_material != material or node.get("key") != f"{material}_fill":
+                raise ValidationError("当前节点不能上传此扫描材料。")
+            for file in files:
+                saved.append(
+                    upload_document(
+                        pk=pk, actor=actor, material=material, file=file, state="scan", note=note
+                    )
+                )
+    except Exception:
+        for document in saved:
+            document.file.delete(save=False)
+        raise
+    return saved
 
 
 @transaction.atomic

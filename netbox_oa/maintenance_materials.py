@@ -12,9 +12,11 @@ SERVICE_ITEMS = (
     ("power", "应急供电"),
 )
 ORDER_FORM_FIELDS = (
+    "contract_id",
     "contract_number",
     "supplier",
     "service_region",
+    "service_region_ids",
     "service_location",
     "service_type",
     "contact_phone",

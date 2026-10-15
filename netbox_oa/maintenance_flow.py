@@ -1,13 +1,14 @@
 """Versioned maintenance process; copied into each order on submission."""
 
+FLOW_NAME = "代维单位维护服务工单流程"
+
 STAGES = (
     ("ordering", "工单下单"),
     ("report", "服务报告"),
     ("settlement", "服务结算"),
-    ("payment", "付款及收尾"),
+    ("payment", "付款申请"),
 )
 ROLES = (
-    ("numbering", "编号管理员"),
     ("reviewer", "初审人"),
     ("department", "部门负责人"),
     ("senior", "上级负责人"),
@@ -15,6 +16,8 @@ ROLES = (
     ("supplier", "服务单位经办组"),
     ("finance", "财务经办组"),
 )
+# Requirements may use "sealed" as a proof requirement, not a document state.
+# Old snapshots containing "paper" remain supported by the service layer.
 MATERIALS = (
     ("order", "维护服务工单"),
     ("report", "服务报告"),
@@ -35,7 +38,7 @@ def build_steps(groups, sla_hours):
                 stage
             )
             if material:
-                required = ((material, "paper" if key == "settlement_final" else "electronic"),)
+                required = ((material, "scan" if key == "settlement_final" else "electronic"),)
             else:
                 required = (
                     ("notice", "electronic"),
@@ -57,158 +60,125 @@ def build_steps(groups, sla_hours):
             }
         )
 
-    def seal(stage, material, return_to):
-        add(
-            stage,
-            f"{stage}_eip",
-            "提交 EIP 用印申请",
-            "external",
-            required=((material, "paper"),),
-            return_to=return_to,
-        )
-        add(
-            stage,
-            f"{stage}_department_seal",
-            "登记部门负责人用印审批结果",
-            "external",
-            "department",
-            return_to=return_to,
-        )
-        add(
-            stage,
-            f"{stage}_senior_seal",
-            "登记上级负责人用印审批结果",
-            "external",
-            "senior",
-            return_to=return_to,
-        )
-        add(
-            stage,
-            f"{stage}_seal",
-            "确认印章管理人盖章",
-            "action",
-            "seal",
-            required=((material, "sealed"),),
-            return_to=return_to,
-        )
-
-    add("ordering", "number", "确认唯一工单编号", "action", "numbering")
     add(
         "ordering",
         "order_fill",
-        "填写并提交维护服务工单",
+        "发起工单",
         "submission",
+        "requester",
         required=(("order", "electronic"),),
     )
     add("ordering", "order_review", "工单初审", "approval", "reviewer", return_to="order_fill")
-    add("ordering", "order_final", "工单部门终审", "approval", "department", return_to="order_fill")
-    seal("ordering", "order", "order_fill")
-    add("ordering", "issue", "下发服务单位并确认服务安排", "action")
+    add("ordering", "order_final", "工单部门审核", "approval", "department", return_to="order_fill")
 
     add(
         "report",
         "report_fill",
-        "服务单位填报服务报告",
+        "服务报告",
         "submission",
-        "supplier",
-        required=(("report", "electronic"),),
+        "requester",
+        required=(("report", "scan"),),
     )
-    add("report", "report_review", "线路主管电子版初审", "approval", return_to="report_fill")
-    add("report", "report_mail", "服务单位盖章并寄送服务报告", "action", "supplier")
     add(
         "report",
-        "report_paper",
-        "线路主管签收及纸质二审",
+        "report_department_seal",
+        "服务报告用印部门审核",
         "approval",
-        required=(("report", "paper"),),
+        "department",
+        required=(("report", "scan"),),
         return_to="report_fill",
     )
-    seal("report", "report", "report_fill")
+    add(
+        "report",
+        "report_senior_seal",
+        "服务报告用印公司审批",
+        "approval",
+        "senior",
+        required=(("report", "scan"),),
+        return_to="report_fill",
+    )
+    add(
+        "report",
+        "report_seal",
+        "服务报告用印",
+        "action",
+        "seal",
+        required=(("report", "sealed"),),
+    )
+    for node in nodes:
+        if node["stage"] == "report":
+            node["report_scans"] = True
 
     add(
         "settlement",
         "settlement_fill",
-        "服务单位填报服务结算单",
+        "服务结算单",
         "submission",
-        "supplier",
-        required=(("settlement", "electronic"),),
+        "requester",
+        required=(("settlement", "scan"),),
     )
     add(
         "settlement",
-        "settlement_review",
-        "线路主管电子版初审",
-        "approval",
-        return_to="settlement_fill",
-    )
-    add("settlement", "settlement_mail", "服务单位盖章并寄送结算单", "action", "supplier")
-    add(
-        "settlement",
-        "settlement_paper",
-        "线路主管纸质审核及签字",
-        "approval",
-        required=(("settlement", "paper"),),
-        return_to="settlement_fill",
-    )
-    add(
-        "settlement",
-        "settlement_final",
-        "结算单部门终审",
+        "settlement_department_seal",
+        "服务结算单用印部门审核",
         "approval",
         "department",
+        required=(("settlement", "scan"),),
         return_to="settlement_fill",
     )
-    seal("settlement", "settlement", "settlement_fill")
-    add("settlement", "payment_plan", "登记付款计划", "submission")
     add(
         "settlement",
+        "settlement_senior_seal",
+        "服务结算单用印公司审批",
+        "approval",
+        "senior",
+        required=(("settlement", "scan"),),
+        return_to="settlement_fill",
+    )
+    add(
+        "settlement",
+        "settlement_seal",
+        "服务结算单用印",
+        "action",
+        "seal",
+        required=(("settlement", "sealed"),),
+    )
+    for node in nodes:
+        if node["stage"] == "settlement":
+            node["scan_material"] = "settlement"
+    add(
+        "payment",
+        "payment_plan",
+        "生成付款",
+        "submission",
+        "requester",
+        required=(("settlement", "sealed"),),
+    )
+    add(
+        "payment",
         "payment_review",
-        "部门审核付款计划",
+        "付款部门审核",
         "approval",
         "department",
         required=(("settlement", "sealed"),),
         return_to="payment_plan",
         payment="submitted",
     )
+    for node in nodes:
+        if node["stage"] == "settlement" or node["key"] in {"payment_plan", "payment_review"}:
+            node["contract_payment"] = True
+            node["scan_material"] = "settlement"
+        if node["key"] == "payment_review":
+            node["contract_payment_review"] = True
 
     add(
         "payment",
-        "payment_docs",
-        "服务单位提交支付材料",
-        "submission",
-        "supplier",
-        required=(("notice", "electronic"), ("invoice", "electronic"), ("contract", "electronic")),
-    )
-    add(
-        "payment",
-        "payment_docs_review",
-        "线路主管审核支付材料",
-        "approval",
-        return_to="payment_docs",
-    )
-    add(
-        "payment",
-        "invoice_check",
-        "发票验真并上传结果",
-        "action",
-        required=(("verification", "electronic"),),
-    )
-    add(
-        "payment",
         "payment_eip",
-        "提交 EIP 付款申请",
+        "付款",
         "external",
+        required=(("notice", "electronic"), ("invoice", "electronic"), ("contract", "electronic")),
         payment="requested",
-        return_to="payment_docs",
     )
-    add("payment", "finance_handover", "纸质资料交财务", "action", payment="awaiting_payment")
-    add(
-        "payment",
-        "finance_process",
-        "登记财务处理结果",
-        "external",
-        "finance",
-        return_to="payment_docs",
-    )
-    add("payment", "paid", "确认实际付款", "action", "finance", payment="paid")
-    add("payment", "receipt", "确认服务单位已收款", "action", payment="received")
+    # Applying for payment completes OA handling, without asserting payment/receipt.
+    nodes[-1]["finish_on_application"] = True
     return nodes

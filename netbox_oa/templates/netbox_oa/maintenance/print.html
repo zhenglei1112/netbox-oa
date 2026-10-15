@@ -15,14 +15,15 @@
   <p class="document-number">单号：{{ data.number }}</p>
   <table class="document-table"><colgroup><col style="width:17%"><col style="width:33%"><col style="width:17%"><col style="width:33%"></colgroup><tbody>
     {% if document.material == 'report' %}<tr><th colspan="4" class="section-heading">甲方填写</th></tr>{% endif %}
-    <tr><th>{% if document.material == 'report' %}申请时间{% else %}发起时间{% endif %}</th><td>{{ requested_at }}</td><th>{% if document.material == 'report' %}申请人员{% else %}发起人员{% endif %}</th><td>{{ data.applicant }}</td></tr>
+    <tr><th>{% if document.material == 'report' %}申请时间{% else %}发起日期{% endif %}</th><td>{% if document.material == "order" %}{{ requested_at|slice:":10" }}{% else %}{{ requested_at }}{% endif %}</td><th>{% if document.material == 'report' %}申请人员{% else %}发起人{% endif %}</th><td>{{ data.applicant }}</td></tr>
     {% if document.material == 'order' %}<tr><th>联系电话</th><td colspan="3">{{ data.contact_phone }}</td></tr>{% endif %}
     <tr><th>合同编号</th><td>{{ data.contract_number }}</td><th>{% if document.material == 'report' %}维护单位{% else %}服务单位{% endif %}</th><td>{{ data.supplier }}</td></tr>
     <tr><th>服务省市</th><td>{{ data.service_region }}</td><th>服务位置</th><td>{{ data.service_location }}</td></tr>
     <tr><th>服务项目<br>（单选）</th><td colspan="3">{% for key,label in service_items %}<span class="service-choice">{% if data.service_type == key %}☑{% else %}□{% endif %} {{ label }}</span>{% endfor %}</td></tr>
     {% if document.material == 'order' %}
       <tr><th>服务要求</th><td colspan="3" class="requirements">{{ data.requirements|linebreaksbr }}</td></tr>
-      <tr><td colspan="2" class="signature">发起人签字：<br><br>日期：</td><td colspan="2" class="signature">部门审核：<br><br>日期：</td></tr>
+      <tr><td colspan="4" class="signature">申请人签字：{% if signatures.order_fill.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_fill.image_id %}" alt="{{ signatures.order_fill.name }}的手写签名">{% else %}{{ signatures.order_fill.name|default:data.signature }}{% endif %}<br>日期：{{ signatures.order_fill.date|default:data.signature_date }}</td></tr>
+      <tr><td colspan="2" class="signature">工单初审<br>签字：{% if signatures.order_review.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_review.image_id %}" alt="{{ signatures.order_review.name }}的手写签名">{% else %}{{ signatures.order_review.name }}{% endif %}<br>日期：{{ signatures.order_review.date }}</td><td colspan="2" class="signature">工单部门审核<br>签字：{% if signatures.order_final.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_final.image_id %}" alt="{{ signatures.order_final.name }}的手写签名">{% else %}{{ signatures.order_final.name }}{% endif %}<br>日期：{{ signatures.order_final.date }}</td></tr>
       <tr><td colspan="4" class="signature">甲方：{{ data.company_name }}<br><br>盖章：<br><br>日期：</td></tr>
     {% else %}
       <tr><th colspan="4" class="section-heading">乙方填写</th></tr>

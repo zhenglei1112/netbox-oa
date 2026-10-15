@@ -1,5 +1,4 @@
-from datetime import date, timedelta
-from decimal import Decimal
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -24,6 +23,19 @@ from netbox_oa.models import (
     MaintenanceTask,
 )
 from netbox_oa.tests import test_workflows
+from tests.support.contracts.models import Contract, ServiceProvider
+from tests.support.dcim.models import Region
+
+
+def sign_initial_task(task):
+    from netbox_oa import maintenance_signatures as signatures
+    from netbox_oa.tests.test_signatures import image_data
+
+    signer = task.order.requester
+    session = signatures.create_session(pk=task.pk, actor=signer)
+    return signatures.capture_signature(
+        token=signatures.mobile_token(session), data_url=image_data()
+    )
 
 
 class MaintenanceTests(TestCase):
@@ -34,20 +46,31 @@ class MaintenanceTests(TestCase):
             username="maintenance_admin", email="admin@example.test", password="test"
         )
         self.group = Group.objects.create(name="Maintenance handlers")
+        self.regions = [Region.objects.create(name=name) for name in ("广东", "惠州")]
+        self.provider = ServiceProvider.objects.create(name="测试服务单位")
+        self.contract = Contract.objects.create(
+            name="测试外购合同",
+            number="HT-2026-006",
+            external_party_object=self.provider,
+            custom_field_data={"ProvincesOfResources": [region.pk for region in self.regions]},
+        )
         self.policy = services.save_policy(
             actor=self.actor, name="默认维护流程", groups={key: self.group.pk for key, _ in ROLES}
         )
         self.order = services.create_order(
             actor=self.actor,
             policy=self.policy,
-            title="惠州光缆故障维护服务",
             service_type="fiber",
             supplier="测试服务单位",
+            contract_id=self.contract.pk,
             contract_number="HT-2026-006",
             service_region="广东 / 惠州",
             service_location="惠州站点",
             requirements="修复光缆中断故障",
         )
+        # Legacy orders created before automatic form generation lacked a document.
+        self.order.documents.all().delete()
+        self.order.events.filter(action="form").delete()
 
     def tearDown(self):
         for document in MaintenanceDocument.objects.all():
@@ -67,13 +90,26 @@ class MaintenanceTests(TestCase):
             return services.save_company_form(
                 pk=order.pk, actor=self.actor, material=material, data=company_form_initial(order)
             )
-        source = self.order.documents.filter(material=material).exclude(kind="scan").first()
+        if material in {"report", "settlement"}:
+            if state == "electronic":
+                state = "paper"
+            source = (
+                services.material_scan_sources(
+                    MaintenanceOrder.objects.get(pk=self.order.pk), material
+                ).first()
+                if state == "sealed"
+                else None
+            )
+        else:
+            source = self.order.documents.filter(material=material).exclude(kind="scan").first()
         return services.upload_document(
             pk=self.order.pk,
             actor=self.actor,
             material=material,
             state=state,
-            source_document_id=source.pk if source and state in {"paper", "sealed"} else None,
+            source_document_id=source.pk
+            if source and state in {"scan", "paper", "sealed"}
+            else None,
             file=SimpleUploadedFile(
                 "material.pdf", b"test document", content_type="application/pdf"
             ),
@@ -83,18 +119,14 @@ class MaintenanceTests(TestCase):
         task = self.current()
         order = MaintenanceOrder.objects.get(pk=self.order.pk)
         node = order.steps_snapshot[task.position]
-        ranks = {"electronic": 0, "awaiting_paper": 0, "paper": 1, "sealed": 2}
+        ranks = {"electronic": 0, "awaiting_paper": 0, "scan": 1, "paper": 1, "sealed": 2}
         for material, state in node["required"]:
             latest = self.order.documents.filter(material=material).order_by("-version").first()
-            if not latest or ranks[latest.state] < ranks[state]:
+            if not latest or (2 if latest.is_sealed else ranks[latest.state]) < ranks[state]:
                 self.upload(material, state)
+        if node["key"] == "order_fill":
+            sign_initial_task(task)
         kwargs = {"external_reference": "EIP-TEST-001"} if task.kind == "external" else {}
-        if node["key"] == "payment_plan":
-            kwargs.update(
-                payment_amount=Decimal("8860.00"),
-                period_start=date(2026, 8, 1),
-                period_end=date(2026, 8, 31),
-            )
         return services.complete_task(
             pk=task.pk, actor=self.actor, comment="已核对凭证并完成办理", **kwargs
         )
@@ -109,23 +141,23 @@ class MaintenanceTests(TestCase):
         ):
             self.complete()
 
-    def test_full_four_stage_lifecycle_finishes_after_receipt(self):
+    def test_full_four_stage_lifecycle_finishes_after_payment_application(self):
         self.start()
         visited = set()
         while self.order.tasks.filter(status="pending").exists():
             order = MaintenanceOrder.objects.get(pk=self.order.pk)
             visited.add(order.stage)
             task = self.current()
-            if task.name == "确认服务单位已收款":
+            if task.name == "付款":
                 self.assertEqual(order.status, "active")
-                self.assertEqual(order.payment_status, "paid")
+                self.assertEqual(order.payment_status, "submitted")
                 self.assertIsNone(order.completed_at)
             self.complete()
         order = MaintenanceOrder.objects.get(pk=self.order.pk)
         self.assertEqual(visited, {key for key, _ in STAGES})
         self.assertEqual(order.status, "completed")
-        self.assertEqual(order.payment_status, "received")
-        self.assertEqual(order.payment_amount, Decimal("8860.00"))
+        self.assertEqual(order.payment_status, "requested")
+        self.assertIsNone(order.payment_amount)
         self.assertIsNotNone(order.completed_at)
         self.assertEqual(order.tasks.count(), len(order.steps_snapshot))
         self.assertEqual(StateLog.objects.for_(order).count(), 2)
@@ -164,12 +196,29 @@ class MaintenanceTests(TestCase):
             self.assertEqual(node["sla_hours"], 36)
         self.assertContains(response, self.group.name)
         self.assertEqual(
-            next(node for node in nodes if node["key"] == "report_paper")["return_label"],
-            "服务单位填报服务报告",
+            next(node for node in nodes if node["key"] == "report_department_seal")["return_label"],
+            "服务报告",
         )
         self.assertFalse(
-            next(node for node in nodes if node["key"] == "ordering_seal")["return_label"]
+            next(node for node in nodes if node["key"] == "report_seal")["return_label"]
         )
+        self.assertEqual(
+            [len(stage["nodes"]) for stage in response.context["stages"]], [3, 4, 4, 3]
+        )
+        by_key = {node["key"]: node for node in nodes}
+        for key in ("report_fill", "settlement_fill", "payment_plan"):
+            self.assertEqual(by_key[key]["role_label"], "发起人")
+            self.assertIsNone(by_key[key]["group"])
+        self.assertIn("至少上传", by_key["report_fill"]["rules"][0])
+        self.assertIn("审核本次提交", by_key["report_department_seal"]["rules"][0])
+        self.assertIn("逐份上传", by_key["settlement_seal"]["rules"][0])
+        self.assertIn("合同详情页", by_key["payment_plan"]["rules"][0])
+        self.assertEqual(by_key["payment_eip"]["completion_label"], "工单完成；付款申请已提交")
+        self.assertContains(response, "付款申请已提交 · 工单完成")
+        self.assertContains(response, "不代表已付款或已收款")
+        self.assertNotContains(response, "已确认收款 · 工单完成")
+        self.assertNotContains(response, "实际付款及收款确认完成后")
+        self.assertNotContains(response, "财务经办组")
         self.assertEqual(self.client.post(url).status_code, 405)
 
     def test_flow_definition_permissions_and_policy_visibility(self):
@@ -188,7 +237,6 @@ class MaintenanceTests(TestCase):
 
     def test_material_gate_and_duplicate_completion(self):
         self.start()
-        self.complete()
         task = self.current()
         with self.assertRaises(ValidationError):
             services.complete_task(pk=task.pk, actor=self.actor)
@@ -216,7 +264,7 @@ class MaintenanceTests(TestCase):
         task = self.current()
         document = self.order.documents.get(material="order")
         services.return_task(pk=task.pk, actor=self.actor, comment="补全服务范围")
-        self.assertEqual(self.current().name, "填写并提交维护服务工单")
+        self.assertEqual(self.current().name, "发起工单")
         with self.assertRaises(ValidationError):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         revision = self.upload("order")
@@ -226,25 +274,90 @@ class MaintenanceTests(TestCase):
         self.assertEqual(MaintenanceTask.objects.get(pk=task.pk).status, "returned")
 
     def test_external_node_requires_reference(self):
-        self.reach("ordering_eip")
-        self.upload("order", "paper")
-        with self.assertRaises(ValidationError):
+        self.reach("payment_eip")
+        order = MaintenanceOrder.objects.get(pk=self.order.pk)
+        self.assertEqual(
+            [step["name"] for step in order.steps_snapshot if step["stage"] == "payment"],
+            ["生成付款", "付款部门审核", "付款"],
+        )
+        with self.assertRaisesMessage(ValidationError, "付款通知书"):
+            services.complete_task(pk=self.current().pk, actor=self.actor)
+        for material in ("notice", "invoice", "contract"):
+            self.upload(material)
+        self.client.force_login(self.actor)
+        page = self.client.get(self.order.get_absolute_url())
+        self.assertContains(page, "上传付款通知书")
+        self.assertContains(page, "上传电子发票")
+        self.assertContains(page, "上传合同复印件")
+        with self.assertRaisesMessage(ValidationError, "外部流程节点必须登记"):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         self.complete()
+        order.refresh_from_db()
+        self.assertEqual(order.status, "completed")
+        self.assertEqual(order.payment_status, "requested")
 
-    def test_payment_plan_requires_amount_and_period(self):
+    def test_legacy_terminal_step_still_requires_receipt(self):
+        self.reach("payment_eip")
+        for material in ("notice", "invoice", "contract"):
+            self.upload(material)
+        order = MaintenanceOrder.objects.get(pk=self.order.pk)
+        order.steps_snapshot[-1].pop("finish_on_application")
+        order.save()
+        with self.assertRaisesMessage(ValidationError, "确认收款后才能结束工单"):
+            self.complete()
+        order.refresh_from_db()
+        self.assertEqual(order.status, "active")
+        self.assertEqual(self.current().status, "pending")
+
+    def test_payment_plan_can_submit_without_payment_selection(self):
         self.reach("payment_plan")
-        with self.assertRaises(ValidationError):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
-        with self.assertRaises(ValidationError):
-            services.complete_task(
-                pk=self.current().pk,
-                actor=self.actor,
-                payment_amount=Decimal("-1"),
-                period_start=date(2026, 8, 31),
-                period_end=date(2026, 8, 1),
-            )
+        services.complete_task(pk=self.current().pk, actor=self.actor)
+        self.assertEqual(self.current().name, "付款部门审核")
+
+    def test_all_fourteen_step_names_and_existing_instance_rename(self):
+        from copy import deepcopy
+        from importlib import import_module
+        from types import SimpleNamespace
+
+        from django.apps import apps
+
+        expected = [
+            "发起工单",
+            "工单初审",
+            "工单部门审核",
+            "服务报告",
+            "服务报告用印部门审核",
+            "服务报告用印公司审批",
+            "服务报告用印",
+            "服务结算单",
+            "服务结算单用印部门审核",
+            "服务结算单用印公司审批",
+            "服务结算单用印",
+            "生成付款",
+            "付款部门审核",
+            "付款",
+        ]
+        self.reach("report_fill")
+        order = MaintenanceOrder.objects.get(pk=self.order.pk)
+        self.assertEqual([node["name"] for node in order.steps_snapshot], expected)
+        order.steps_snapshot[order.current_position]["name"] = "上传服务报告"
+        order.save()
+        task = self.current()
+        task.name = "上传服务报告"
+        task.save()
+        original = deepcopy(order.steps_snapshot)
+        original[order.current_position]["name"] = "服务报告"
+        migration = import_module("netbox_oa.migrations.0015_maintenance_step_names")
+        migration.rename_steps(apps, SimpleNamespace(connection=SimpleNamespace(alias="default")))
+        order.refresh_from_db()
+        task.refresh_from_db()
+        self.assertEqual(order.steps_snapshot, original)
+        self.assertEqual(task.name, "服务报告")
+        self.assertEqual(task.status, "pending")
+        self.assertEqual(order.current_position, task.position)
+        self.upload("report")
         self.complete()
+        self.assertEqual(self.current().name, "服务报告用印部门审核")
 
     def test_configuration_snapshot_and_future_group_protection(self):
         self.start()
@@ -255,7 +368,7 @@ class MaintenanceTests(TestCase):
             name=self.policy.name,
             groups={key: replacement.pk for key, _ in ROLES},
         )
-        self.assertEqual(self.current().assigned_group_id, self.group.pk)
+        self.assertEqual(self.order.steps_snapshot[1]["group_id"], self.group.pk)
         with self.assertRaises(ProtectedError):
             self.group.delete()
 
@@ -266,10 +379,83 @@ class MaintenanceTests(TestCase):
         self.grant(actor, "maintenanceorder", "view")
         return actor
 
-    def test_claim_and_transfer_prevent_other_members_handling_task(self):
+    def reach_legacy_shared_report(self):
+        """Keep coverage of pre-migration shared-task claiming and transfers."""
+        self.reach("report_fill")
+        order = MaintenanceOrder.objects.get(pk=self.order.pk)
+        order.steps_snapshot[order.current_position].update(role="supplier", group_id=self.group.pk)
+        order.save()
+        task = self.current()
+        task.assigned_user = None
+        task.assigned_group = self.group
+        task.save()
+
+    def test_three_submission_steps_belong_to_requester_even_when_owner_differs(self):
+        requester, owner = self.worker("requester"), self.worker("owner")
+        self.grant(requester, "maintenancedocument", "view")
+        MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=requester, owner=owner)
         self.start()
+        checked = []
+        while self.order.tasks.filter(status="pending").exists():
+            task = self.current()
+            order = MaintenanceOrder.objects.get(pk=self.order.pk)
+            node = order.steps_snapshot[task.position]
+            if node["key"] in {"report_fill", "settlement_fill", "payment_plan"}:
+                self.assertEqual(node["role"], "requester")
+                self.assertEqual(task.assigned_user_id, requester.pk)
+                self.assertIsNone(task.assigned_group_id)
+                self.assertFalse(services.task_is_assigned(task, owner))
+                with self.assertRaises(PermissionDenied):
+                    services.complete_task(pk=task.pk, actor=owner)
+                if node["key"] != "payment_plan":
+                    self.upload("report" if node["key"] == "report_fill" else "settlement")
+                services.complete_task(pk=task.pk, actor=requester)
+                checked.append(node["key"])
+            else:
+                self.complete()
+        self.assertEqual(checked, ["report_fill", "settlement_fill", "payment_plan"])
+
+    def test_requester_migration_reassigns_pending_task_without_rewriting_history(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        self.reach_legacy_shared_report()
+        pending = self.current()
+        historical = self.order.tasks.filter(status="completed").first()
+        historical_actor = historical.decided_by_id
+        evidence = pending.evidence
+        migration = import_module("netbox_oa.migrations.0017_requester_submission_steps")
+        migration.assign_requester(
+            apps, SimpleNamespace(connection=SimpleNamespace(alias="default"))
+        )
+        pending.refresh_from_db()
+        historical.refresh_from_db()
+        order = MaintenanceOrder.objects.get(pk=self.order.pk)
+        self.assertEqual(pending.assigned_user_id, order.requester_id)
+        self.assertIsNone(pending.assigned_group_id)
+        self.assertEqual(pending.status, "pending")
+        self.assertEqual(pending.evidence, evidence)
+        self.assertEqual(historical.decided_by_id, historical_actor)
+        for node in order.steps_snapshot:
+            if node["key"] in {"report_fill", "settlement_fill", "payment_plan"}:
+                self.assertEqual(node["role"], "requester")
+                self.assertIsNone(node["group_id"])
+
+    def test_automatic_assignment_and_transfer_prevent_other_members_handling_task(self):
+        self.reach_legacy_shared_report()
         first, second = self.worker("first"), self.worker("second")
-        task = services.claim_task(pk=self.current().pk, actor=first)
+        self.grant(first, "maintenancedocument", "add")
+        services.upload_document(
+            pk=self.order.pk,
+            actor=first,
+            material="report",
+            state="paper",
+            file=SimpleUploadedFile("report.pdf", b"report"),
+        )
+        task = self.current()
+        self.assertEqual(task.assigned_user_id, first.pk)
+        self.assertIsNotNone(task.started_at)
         with self.assertRaises(PermissionDenied):
             services.complete_task(pk=task.pk, actor=second)
         services.transfer_task(pk=task.pk, actor=first, user_id=second.pk, comment="交班")
@@ -288,7 +474,7 @@ class MaintenanceTests(TestCase):
         self.assertEqual(task.kind, "countersign")
         self.assertEqual(task.assigned_user_id, target.pk)
         services.complete_task(pk=task.pk, actor=target, comment="已审核")
-        self.assertEqual(self.current().name, "工单部门终审")
+        self.assertEqual(self.current().name, "工单部门审核")
 
     def test_failure_rolls_back_task_event_and_state_log(self):
         self.start()
@@ -341,7 +527,7 @@ class MaintenanceTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.order.number)
-        self.assertContains(response, "确认唯一工单编号")
+        self.assertContains(response, "发起工单")
         self.assertContains(response, "工单下单")
         self.assertEqual(
             self.client.get(reverse("plugins:netbox_oa:maintenanceorder_add")).status_code, 200
@@ -352,7 +538,6 @@ class MaintenanceTests(TestCase):
             ).status_code,
             200,
         )
-        self.complete()
         self.upload("order")
         document = self.upload("order", "sealed")
         response = self.client.get(
@@ -376,6 +561,7 @@ class MaintenanceTests(TestCase):
 
     def test_http_actions_post_only_and_csrf_protected(self):
         self.start()
+        self.upload("order")
         self.client.force_login(self.actor)
         url = reverse(
             "plugins:netbox_oa:maintenancetask_action", args=[self.current().pk, "complete"]
@@ -384,6 +570,7 @@ class MaintenanceTests(TestCase):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.actor)
         self.assertEqual(client.post(url, {}).status_code, 403)
+        sign_initial_task(self.current())
         self.assertEqual(self.client.post(url, {}).status_code, 302)
 
     def test_waiting_filter_and_deadline_stats(self):
@@ -400,10 +587,12 @@ class MaintenanceTests(TestCase):
         self.assertEqual(response.context["stats"]["overdue"], 1)
 
     def test_update_order_only_in_draft_or_correction(self):
-        services.update_order(pk=self.order.pk, actor=self.actor, title="修订标题")
+        services.update_order(pk=self.order.pk, actor=self.actor, service_location="修订位置")
         self.reach("order_review")
         with self.assertRaises(ValidationError):
-            services.update_order(pk=self.order.pk, actor=self.actor, title="不能覆盖已审核内容")
+            services.update_order(
+                pk=self.order.pk, actor=self.actor, service_location="不能覆盖已审核内容"
+            )
         services.return_task(pk=self.current().pk, actor=self.actor, comment="补正")
         services.update_order(pk=self.order.pk, actor=self.actor, requirements="修订服务要求")
         self.assertEqual(
@@ -435,6 +624,7 @@ class MaintenanceAPITests(TestCase):
                 "owner": self.actor.pk,
                 "service_type": "fiber",
                 "supplier": "服务单位",
+                "contract_id": self.contract.pk,
                 "contract_number": "HT-1",
                 "service_region": "广东",
                 "service_location": "站点",
@@ -459,7 +649,9 @@ class MaintenanceAPITests(TestCase):
     def test_post_transition_uses_change_permission_and_token_write_gate(self):
         self.start()
         task = self.current()
-        worker = self.worker("api_handler")
+        worker = self.actor
+        self.upload("order")
+        sign_initial_task(task)
         response = self.api(worker).post(
             f"/api/maintenance/tasks/{task.pk}/complete/", {}, format="json"
         )
@@ -545,6 +737,7 @@ class MaintenanceCompanyFormTests(TestCase):
         self.client.force_login(self.actor)
         self.assertContains(self.client.get(self.form_url()), "保存并查看打印版")
         data = self.form_data()
+        data["service_region"] = [region.pk for region in self.regions]
         data["requirements"] = "核对端口并修复故障"
         response = self.client.post(self.form_url(), data)
         document = self.order.documents.get(kind="form")
@@ -558,11 +751,11 @@ class MaintenanceCompanyFormTests(TestCase):
         self.assertFalse(document.file)
         printed = self.client.get(response.url)
         self.assertContains(printed, data["requirements"])
-        self.assertContains(printed, "部门审核：")
+        self.assertContains(printed, "工单部门审核")
         self.assertContains(printed, "print-document")
         edited = self.client.get(self.form_url())
-        self.assertContains(edited, 'type="datetime-local"')
-        self.assertContains(edited, 'value="' + data["requested_at"] + '"')
+        self.assertContains(edited, 'type="date"')
+        self.assertContains(edited, 'value="' + data["requested_at"][:10] + '"')
         response = self.client.post(
             reverse("plugins:netbox_oa:maintenance_upload", args=[self.order.pk]),
             {
@@ -593,7 +786,7 @@ class MaintenanceCompanyFormTests(TestCase):
         )
         with self.assertRaisesMessage(ValidationError, "不能替代乙方报告"):
             services.complete_task(pk=self.current().pk, actor=self.actor)
-        with self.assertRaisesMessage(ValidationError, "请先生成公司表单或上传乙方电子附件"):
+        with self.assertRaisesMessage(ValidationError, "上传服务报告时请提交扫描版原件"):
             self.upload("report", "sealed")
         self.client.force_login(self.actor)
         response = self.client.get(
@@ -603,7 +796,7 @@ class MaintenanceCompanyFormTests(TestCase):
             self.assertContains(response, label)
         self.upload("report")
         self.complete()
-        self.assertEqual(self.current().name, "线路主管电子版初审")
+        self.assertEqual(self.current().name, "服务报告用印部门审核")
 
     def test_scan_rejects_stale_source_and_non_scan_file(self):
         original = self.upload("order")

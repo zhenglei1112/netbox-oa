@@ -9,7 +9,7 @@
 {% if detail.order.status == 'draft' or detail.order.status == 'active' %}
 {% if perms.netbox_oa.add_maintenancedocument and material.scan_source %}
 <details class="oa-material-upload"><summary>上传签字盖章扫描件</summary>
-  <form method="post" enctype="multipart/form-data" action="{% url 'plugins:netbox_oa:maintenance_upload' pk=detail.order.pk %}">{% csrf_token %}
+  <form method="post" enctype="multipart/form-data" action="{% url 'plugins:netbox_oa:maintenance_upload' pk=detail.order.pk %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}">
     <small>对应原件 v{{ material.scan_source.version }}，支持 PDF、PNG、JPEG。</small>
     <input type="hidden" name="material" value="{{ material.key }}">
     {{ material.scan_form.source_document_id }}{{ material.scan_form.file.as_field_group }}{{ material.scan_form.state.as_field_group }}{{ material.scan_form.note.as_field_group }}

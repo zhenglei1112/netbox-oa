@@ -1,0 +1,16 @@
+<div class="oa-audit-content">
+  {% if detail.has_earlier_events and not compact %}<a data-oa-history class="oa-history-more" href="{{ history_url }}{% if not compact %}&amp;panel=activity{% endif %}">加载更早记录</a>{% endif %}
+  <ol class="oa-audit-records">
+    {% for item in activity_records %}
+    <li class="oa-audit-record {% if item.event.action == 'return' or item.event.action == 'terminate' %}oa-audit-warning{% endif %}" data-event-id="{{ item.event.pk }}">
+      <span class="oa-audit-symbol" aria-hidden="true">{{ item.symbol }}</span>
+      <div class="oa-audit-record-body">
+        <div class="oa-audit-record-heading"><strong>{% if item.event.task %}{{ item.event.task.name }}{% else %}{{ item.short_label }}{% endif %}</strong><time datetime="{{ item.event.created|date:'c' }}" title="{{ item.event.created|date:'Y-m-d H:i' }}">{{ item.event.created|date:'m-d H:i' }}</time></div>
+        <div class="oa-audit-person">{{ item.actor_name }}{% if item.event.task %}<span> · {{ item.short_label }}</span>{% endif %}</div>
+        {% if item.event.details.comment %}<p class="oa-audit-comment {% if compact %}oa-clamp-two{% endif %}">{{ item.event.details.comment|linebreaksbr }}</p>{% endif %}
+        {% if not compact %}<p class="oa-audit-description">{{ item.description }}</p>{% if item.event.details.external_reference %}<small>外部单号：{{ item.event.details.external_reference }}</small>{% endif %}{% endif %}
+      </div>
+    </li>
+    {% empty %}<li class="oa-audit-empty">暂无可查看记录</li>{% endfor %}
+  </ol>
+</div>
