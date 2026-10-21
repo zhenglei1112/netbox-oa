@@ -1,7 +1,13 @@
     <article class="oa-document-card {% if material.required_now %}required{% endif %}">
-      <div class="oa-document-heading"><span class="oa-file-icon" aria-hidden="true">{% if material.form_document %}▤{% else %}▧{% endif %}</span><div><h4>{{ material.name }}</h4><span class="oa-file-status">{% if material.scanned_material %}扫描版 · {{ material.scan_sources|length }} 份{% elif material.key == 'report' and not material.attachment %}待上传乙方报告{% elif material.current_file %}{{ material.current_file.get_state_display }} · v{{ material.current_file.version }}{% else %}待准备{% endif %}</span></div>{% if material.required_now %}<span class="oa-required-tag">当前所需</span>{% endif %}</div>
-      <div class="oa-document-footer"><span>{% if material.current_file %}{{ material.current_file.created|date:'m-d H:i' }}{% else %}暂无文件{% endif %}</span><div>
-        {% if material.current_file %}{% if material.current_file.kind == 'form' %}<a href="{% url 'plugins:netbox_oa:maintenance_print' pk=material.current_file.pk %}" target="_blank" rel="noopener">查看 / 打印表单</a>{% else %}<a href="{% url 'plugins:netbox_oa:maintenance_download' pk=material.current_file.pk %}">下载附件</a>{% endif %}{% endif %}
-        <a data-oa-open="material-{{ material.key }}" href="{{ detail_url }}&amp;panel=material-{{ material.key }}">管理资料 →</a>
+      <div class="oa-document-heading"><span class="oa-file-icon" aria-hidden="true">{% if material.form_document %}▤{% else %}▧{% endif %}</span><div><h4>{{ material.name }}</h4><span class="oa-file-status">{% if material.requires_filling %}需填写{% else %}无需填写{% endif %} · {% if material.scanned_material %}扫描版 · {{ material.scan_sources|length }} 份{% elif material.key == 'report' and not material.attachment %}待上传乙方报告{% elif material.current_file %}{{ material.current_file.get_state_display }} · v{{ material.current_file.version }}{% else %}待准备{% endif %}</span></div>{% if material.required_now %}<span class="oa-required-tag">当前所需</span>{% endif %}</div>
+      {% if material.stage_upload_required %}
+      <div class="oa-stage-upload {% if material.stage_upload_complete %}oa-stage-upload-complete{% else %}oa-stage-upload-pending{% endif %}" role="status" aria-live="polite">
+        <strong>{% if material.stage_upload_complete %}<i class="mdi mdi-check-circle-outline" aria-hidden="true"></i> {% if material.stage_materials_adjusted %}本阶段材料已调整 · 保留 {{ material.stage_upload_count }} 份{% else %}本阶段已完成上传{% endif %}{% elif material.stage_upload_document %}本阶段已上传 · 用印扫描件 {{ material.stage_upload_count }}/{{ material.stage_upload_total }} 份{% else %}本阶段待上传{% endif %}</strong>
+        {% if material.stage_upload_document %}<span>最近上传：{{ material.stage_upload_document.created|date:'Y-m-d H:i' }} · v{{ material.stage_upload_document.version }}</span>{% endif %}
+        {% if material.stage_upload_document and material.missing_upload_sources %}<span>仍需上传用印件：{% for source in material.missing_upload_sources %}{{ source.original_name }}（原件 v{{ source.version }}）{% if not forloop.last %}、{% endif %}{% endfor %}</span>{% endif %}
+      </div>
+      {% endif %}
+      <div class="oa-document-footer"><span>{% if not material.stage_upload_required %}{% if material.current_file %}{{ material.current_file.created|date:'m-d H:i' }}{% else %}暂无文件{% endif %}{% endif %}</span><div class="btn-list mb-0 gap-1">
+        {% include 'netbox_oa/maintenance/inbox_material_operations.html' %}
       </div></div>
     </article>

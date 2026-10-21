@@ -45,27 +45,9 @@
     }
     if (focus) link.focus();
   }
-  function periodInputs(select) {
-    for (const name of ['period_start', 'period_end']) {
-      const input = select.form.querySelector(`[name="${name}"]`);
-      if (!input) continue;
-      let value = input.value;
-      if (select.value === 'month' && /^\d{4}-\d{2}-\d{2}$/.test(value)) value = value.slice(0, 7);
-      if (select.value === 'day' && /^\d{4}-\d{2}$/.test(value)) {
-        const [year, month] = value.split('-').map(Number);
-        const day = name === 'period_end' ? new Date(year, month, 0).getDate() : 1;
-        value += '-' + String(day).padStart(2, '0');
-      }
-      const valid = !value || (select.value === 'month'
-        ? /^\d{4}-\d{2}$/.test(value) : /^\d{4}-\d{2}-\d{2}$/.test(value));
-      input.type = valid ? (select.value === 'month' ? 'month' : 'date') : 'text';
-      input.value = value;
-      input.required = true;
-    }
-  }
+
   function enhance() {
     root().classList.add('oa-enhanced');
-    root().querySelectorAll('.oa-actions [name="settlement_period_mode"]').forEach(periodInputs);
     for (const panel of root().querySelectorAll('dialog')) {
       const tabs = [...panel.querySelectorAll('[data-oa-tab]')];
       if (tabs.length) {
@@ -115,6 +97,10 @@
         if (tab) activateTab(tab);
       }
       if (!panel.open) panel.showModal();
+      if (panel.classList.contains('oa-review-panel')) {
+        const frame = panel.querySelector('[data-review-src]');
+        if (frame) frame.src = frame.dataset.reviewSrc;
+      }
       document.documentElement.classList.add('oa-panel-open');
       if (trigger.dataset.oaEvent) {
         const record = panel.querySelector(`[data-event-id="${trigger.dataset.oaEvent}"]`);
@@ -138,7 +124,6 @@
   });
   document.addEventListener('change', (event) => {
     const input = event.target;
-    if (input.matches('.oa-actions [name="settlement_period_mode"]')) periodInputs(input);
     if (!input.matches('.oa-file-drop input[type=file]')) return;
     const label = input.closest('.oa-file-drop');
     label.querySelector('strong').textContent = input.files.length
@@ -332,6 +317,25 @@
       return;
     }
     navigate(location.href, {pop: true, state: event.state});
+  });
+  document.addEventListener('oa-upload-complete', async () => {
+    const panel = root().querySelector('dialog[open]');
+    const panelId = panel?.id;
+    const reviewSource = panel?.querySelector('[data-review-src]')?.src;
+    const pane = panel?.querySelector('[data-oa-tab].active')?.dataset.oaTab;
+    savePosition();
+    await navigate(root().dataset.detailUrl, {mode: 'history', pop: true, state: history.state});
+    const refreshed = panelId && document.getElementById(panelId);
+    if (refreshed) {
+      if (pane) {
+        const tab = refreshed.querySelector(`[data-oa-tab="${pane}"]`);
+        if (tab) activateTab(tab);
+      }
+      if (!refreshed.open) refreshed.showModal();
+      const reviewFrame = refreshed.querySelector('[data-review-src]');
+      if (reviewFrame) reviewFrame.src = reviewSource || reviewFrame.dataset.reviewSrc;
+      document.documentElement.classList.add('oa-panel-open');
+    }
   });
   window.addEventListener('pagehide', savePosition);
   // Persist scroll into the current history entry without waiting for another click.

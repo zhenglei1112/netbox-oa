@@ -1,19 +1,22 @@
 <aside class="card oa-audit" aria-label="审批经过">
   <div class="oa-audit-expanded">
-    <header class="oa-audit-header"><div><h3>审批经过</h3></div>{% if detail %}<a class="oa-audit-open" data-oa-open="activity" href="{{ detail_url }}&amp;panel=activity" aria-label="查看完整审批经过" title="查看完整审批经过">↗</a>{% endif %}</header>
+    <header class="oa-audit-header"><div><h3>审批经过</h3></div>{% if detail %}<a class="btn btn-ghost-primary oa-audit-open" data-oa-open="activity" href="{{ detail_url }}&amp;panel=activity" aria-label="查看完整审批经过" title="查看完整审批经过">↗</a>{% endif %}</header>
     {% if detail.current %}<div class="oa-audit-pending"><span aria-hidden="true">●</span><div><strong>{{ detail.current.name }}</strong>{% if detail.current_activity %}<span>{{ detail.current_activity.actor_name }} · {{ detail.current_activity.short_label }}</span>{% if detail.current_activity_comment %}<p class="oa-audit-comment oa-clamp-two">{{ detail.current_activity_comment|linebreaksbr }}</p>{% endif %}{% endif %}</div></div>{% endif %}
-    <div class="oa-audit-scroll" tabindex="-1">{% if detail %}{% include 'netbox_oa/maintenance/inbox_activity_records.html' with compact=True activity_records=detail.recent_events %}{% else %}<p class="oa-audit-empty">选择工单查看审批经过</p>{% endif %}</div>
+    <div class="oa-audit-scroll" tabindex="-1">{% if detail %}{% include 'netbox_oa/maintenance/inbox_activity_records.html' with compact=True activity_records=detail.sidebar_events %}{% else %}<p class="oa-audit-empty">选择工单查看审批经过</p>{% endif %}</div>
   </div>
   <nav class="oa-audit-icons" aria-label="审批经过缩略栏">
-    {% if detail %}<a class="oa-audit-main-icon" data-oa-open="activity" href="{{ detail_url }}&amp;panel=activity" aria-label="查看审批经过" title="审批经过"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"/></svg></a>
+    {% if detail %}<a class="btn btn-ghost-primary oa-audit-main-icon" data-oa-open="activity" href="{{ detail_url }}&amp;panel=activity" aria-label="查看审批经过" title="审批经过"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"/></svg></a>
     {% if detail.current %}<span class="oa-audit-pending-icon" title="{{ detail.current.name }} · 等待{{ detail.waiting_for }}" aria-label="当前节点待处理">●</span>{% endif %}
-    {% for item in detail.recent_events %}<a class="oa-audit-event-icon {% if item.event.action == 'return' %}oa-audit-warning{% endif %}" data-oa-open="activity" data-oa-event="{{ item.event.pk }}" href="{{ detail_url }}&amp;panel=activity" title="{% if item.event.task %}{{ item.event.task.name }} · {% endif %}{{ item.actor_name }} · {{ item.short_label }} · {{ item.event.created|date:'m-d H:i' }}" aria-label="{% if item.event.task %}{{ item.event.task.name }} · {% endif %}{{ item.actor_name }} · {{ item.short_label }} · {{ item.event.created|date:'m-d H:i' }}">{{ item.symbol }}</a>{% endfor %}
+    {% for item in detail.recent_events %}<a class="btn {% if item.event.action == 'return' %}btn-ghost-warning{% else %}btn-ghost-secondary{% endif %} oa-audit-event-icon" data-oa-open="activity" data-oa-event="{{ item.event.pk }}" href="{{ detail_url }}&amp;panel=activity" title="{% if item.event.task %}{{ item.event.task.name }} · {% endif %}{{ item.actor_name }} · {{ item.short_label }} · {{ item.event.created|date:'m-d H:i' }}" aria-label="{% if item.event.task %}{{ item.event.task.name }} · {% endif %}{{ item.actor_name }} · {{ item.short_label }} · {{ item.event.created|date:'m-d H:i' }}">{{ item.symbol }}</a>{% endfor %}
     {% else %}<span class="oa-audit-main-icon" title="选择工单查看审批经过" aria-label="审批经过暂无内容">○</span>{% endif %}
   </nav>
   {% if detail %}
-  <dialog class="oa-panel" id="activity" aria-labelledby="oa-activity-title" {% if panel_id == 'activity' %}open{% endif %}>
-    <header class="oa-panel-header"><div><span class="oa-eyebrow">{{ detail.order.number }}</span><h2 id="oa-activity-title">审批经过</h2></div><a data-oa-close class="oa-close" href="{{ detail_url }}" aria-label="关闭审批经过">×</a></header>
-    <div class="oa-panel-body oa-audit-dialog-scroll">{% include 'netbox_oa/maintenance/inbox_activity_records.html' with compact=False activity_records=detail.approval_events %}</div>
+  <dialog class="oa-panel oa-approval-panel" id="activity" aria-labelledby="oa-activity-title" {% if panel_id == 'activity' %}open{% endif %}>
+    <header class="oa-panel-header oa-approval-header"><div class="oa-approval-heading"><h2 id="oa-activity-title">审批经过</h2><span class="oa-eyebrow">{{ detail.order.number }}</span></div>{% if detail.approval_diagram %}<div class="oa-flow-legend" aria-label="审批经过图例"><span class="oa-history-completed">已完成</span><span class="oa-history-current">当前环节</span><span class="oa-history-returned">已退回</span><span>未办理</span><span>实线：顺序办理</span><span class="oa-flow-return-label">虚线：退回补正</span></div>{% endif %}<a data-oa-close class="btn btn-ghost-secondary oa-close" href="{{ detail_url }}" aria-label="关闭审批经过">×</a></header>
+    <div class="oa-panel-body oa-audit-dialog-scroll">
+      {% include 'netbox_oa/maintenance/inbox_approval_diagram.html' %}
+      <section class="oa-approval-records"><h3>详细办理记录与意见</h3>{% include 'netbox_oa/maintenance/inbox_activity_timeline.html' with activity_records=detail.approval_events %}</section>
+    </div>
   </dialog>
   {% endif %}
 </aside>

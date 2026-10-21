@@ -1,5 +1,4 @@
 <div class="oa-audit-content">
-  {% if detail.has_earlier_events and not compact %}<a data-oa-history class="oa-history-more" href="{{ history_url }}{% if not compact %}&amp;panel=activity{% endif %}">加载更早记录</a>{% endif %}
   <ol class="oa-audit-records">
     {% for item in activity_records %}
     <li class="oa-audit-record {% if item.event.action == 'return' or item.event.action == 'terminate' %}oa-audit-warning{% endif %}" data-event-id="{{ item.event.pk }}">

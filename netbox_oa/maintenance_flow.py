@@ -13,11 +13,8 @@ ROLES = (
     ("department", "部门负责人"),
     ("senior", "上级负责人"),
     ("seal", "印章管理人"),
-    ("supplier", "服务单位经办组"),
-    ("finance", "财务经办组"),
 )
 # Requirements may use "sealed" as a proof requirement, not a document state.
-# Old snapshots containing "paper" remain supported by the service layer.
 MATERIALS = (
     ("order", "维护服务工单"),
     ("report", "服务报告"),
@@ -29,22 +26,14 @@ MATERIALS = (
 )
 
 
+def scan_fill_key(material):
+    return "order_scan_fill" if material == "order" else f"{material}_fill"
+
+
 def build_steps(groups, sla_hours):
     nodes = []
 
     def add(stage, key, name, kind, role="owner", required=(), return_to=None, payment=""):
-        if kind == "approval" and not required:
-            material = {"ordering": "order", "report": "report", "settlement": "settlement"}.get(
-                stage
-            )
-            if material:
-                required = ((material, "scan" if key == "settlement_final" else "electronic"),)
-            else:
-                required = (
-                    ("notice", "electronic"),
-                    ("invoice", "electronic"),
-                    ("contract", "electronic"),
-                )
         nodes.append(
             {
                 "stage": stage,
@@ -62,14 +51,68 @@ def build_steps(groups, sla_hours):
 
     add(
         "ordering",
-        "order_fill",
-        "发起工单",
+        "order_correction",
+        "工单修正",
         "submission",
         "requester",
         required=(("order", "electronic"),),
     )
-    add("ordering", "order_review", "工单初审", "approval", "reviewer", return_to="order_fill")
-    add("ordering", "order_final", "工单部门审核", "approval", "department", return_to="order_fill")
+    nodes[-1]["return_only"] = True
+    add(
+        "ordering",
+        "order_review",
+        "工单初审",
+        "approval",
+        "reviewer",
+        required=(("order", "electronic"),),
+        return_to="order_correction",
+    )
+    add(
+        "ordering",
+        "order_final",
+        "工单部门审核",
+        "approval",
+        "department",
+        required=(("order", "electronic"),),
+        return_to="order_correction",
+    )
+
+    add(
+        "ordering",
+        "order_scan_fill",
+        "服务工单",
+        "submission",
+        "requester",
+        required=(("order", "scan"),),
+    )
+    add(
+        "ordering",
+        "order_department_seal",
+        "服务工单用印部门审核",
+        "approval",
+        "department",
+        required=(("order", "scan"),),
+        return_to="order_scan_fill",
+    )
+    add(
+        "ordering",
+        "order_senior_seal",
+        "服务工单用印公司审批",
+        "approval",
+        "senior",
+        required=(("order", "scan"),),
+        return_to="order_scan_fill",
+    )
+    add(
+        "ordering",
+        "order_seal",
+        "服务工单用印",
+        "action",
+        "seal",
+        required=(("order", "sealed"),),
+    )
+    for node in nodes[-4:]:
+        node["scan_material"] = "order"
 
     add(
         "report",
@@ -107,7 +150,7 @@ def build_steps(groups, sla_hours):
     )
     for node in nodes:
         if node["stage"] == "report":
-            node["report_scans"] = True
+            node["scan_material"] = "report"
 
     add(
         "settlement",
@@ -165,11 +208,9 @@ def build_steps(groups, sla_hours):
         payment="submitted",
     )
     for node in nodes:
-        if node["stage"] == "settlement" or node["key"] in {"payment_plan", "payment_review"}:
-            node["contract_payment"] = True
+        if node["key"] in {"payment_plan", "payment_review"}:
             node["scan_material"] = "settlement"
-        if node["key"] == "payment_review":
-            node["contract_payment_review"] = True
+            node["payment_contract_stage"] = True
 
     add(
         "payment",
@@ -179,6 +220,4 @@ def build_steps(groups, sla_hours):
         required=(("notice", "electronic"), ("invoice", "electronic"), ("contract", "electronic")),
         payment="requested",
     )
-    # Applying for payment completes OA handling, without asserting payment/receipt.
-    nodes[-1]["finish_on_application"] = True
     return nodes

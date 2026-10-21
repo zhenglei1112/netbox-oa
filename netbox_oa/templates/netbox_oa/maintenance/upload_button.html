@@ -1,0 +1,1 @@
+<a class="btn btn-ghost-primary{% if review_upload %} review-upload{% endif %}" title="上传" aria-label="上传" data-oa-upload {% if review_upload %}data-review-upload="{{ material_key }}" target="_top"{% endif %} href="{% url 'plugins:netbox_oa:maintenance_material_upload' pk=order_id material=material_key %}"><i class="mdi mdi-upload" aria-hidden="true"></i></a>

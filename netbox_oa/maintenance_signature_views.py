@@ -15,18 +15,22 @@ from django.views.decorators.csrf import csrf_exempt
 from qrcode.image.svg import SvgPathImage
 
 from . import maintenance_signatures as signing
-from .models import MaintenanceSignature, MaintenanceTask
+from .models import MaintenanceSavedSignature, MaintenanceSignature, MaintenanceTask
 from .services import _allowed
 
 
 def owned(pk, user):
     signature = get_object_or_404(
-        MaintenanceSignature.objects.select_related("task__order", "signer", "document"), pk=pk
+        MaintenanceSignature.objects.select_related("task__order", "signer", "document__order"),
+        pk=pk,
     )
     if signature.signer_id != user.pk:
         raise PermissionDenied
-    _allowed(type(signature.task.order), user, "view", signature.task.order_id)
-    _allowed(type(signature.task), user, "view", signature.task_id)
+    _allowed(type(signature.document.order), user, "view", signature.document.order_id)
+    if signature.task_id:
+        _allowed(type(signature.task), user, "view", signature.task_id)
+    else:
+        _allowed(type(signature.document.order), user, "change", signature.document.order_id)
     return signature
 
 
@@ -48,6 +52,9 @@ def signature_payload(signature, request):
         "status_url": url("_status"),
         "action_url": url(""),
         "image_url": url("_image"),
+        "has_saved_signature": MaintenanceSavedSignature.objects.filter(
+            signer_id=signature.signer_id
+        ).exists(),
     }
 
 
@@ -89,6 +96,9 @@ class SignatureView(LoginRequiredMixin, View):
                 "signature": signature,
                 "qr": base64.b64encode(qr).decode("ascii"),
                 "mobile_url": mobile_url,
+                "has_saved_signature": MaintenanceSavedSignature.objects.filter(
+                    signer=request.user
+                ).exists(),
             },
         )
         # Authenticated desktop POSTs need a same-origin Referer for Django's
@@ -102,6 +112,8 @@ class SignatureView(LoginRequiredMixin, View):
         try:
             if request.POST.get("operation") == "cancel":
                 signature = signing.cancel_signature(pk=pk, actor=request.user)
+            elif request.POST.get("operation") == "reuse":
+                signature = signing.reuse_signature(pk=pk, actor=request.user)
             else:
                 signature = signing.confirm_signature(pk=pk, actor=request.user)
         except ValidationError as error:
@@ -110,8 +122,14 @@ class SignatureView(LoginRequiredMixin, View):
             messages.error(request, "；".join(error.messages))
             return redirect("plugins:netbox_oa:maintenance_signature", pk=pk)
         if wants_json(request):
-            return JsonResponse({"state": "empty" if signature.cancelled else "confirmed"})
-        return redirect(signature.task.order.get_absolute_url())
+            return JsonResponse({
+                "state": "empty" if signature.cancelled else (
+                    "confirmed" if signature.confirmed_at else "uploaded"
+                )
+            })
+        if request.POST.get("operation") == "reuse":
+            return redirect("plugins:netbox_oa:maintenance_signature", pk=pk)
+        return redirect(signature.document.order.get_absolute_url())
 
 
 @method_decorator(never_cache, name="dispatch")
@@ -147,13 +165,17 @@ class MobileSignatureView(View):
         context, status = {}, 200
         try:
             signature = signing.session_from_token(token)
-            context["number"] = signature.task.order.number
-            context["node"] = signature.task.name
+            context["number"] = signature.document.order.number
+            context["node"] = signature.task.name if signature.task_id else "申请人签名"
             context["success"] = bool(signature.uploaded_at)
             context["submission_token"] = signing.submission_token(signature)
             if upload:
                 signing.validate_submission(signature, request.POST.get("submission_token"))
-                signing.capture_signature(token=token, data_url=request.POST.get("image_data"))
+                signing.capture_signature(
+                    token=token,
+                    data_url=request.POST.get("image_data"),
+                    save_signature=request.POST.get("save_signature") == "on",
+                )
                 context["success"] = True
         except (ValidationError, PermissionDenied) as error:
             context["error"] = (
@@ -173,14 +195,18 @@ class MobileSignatureView(View):
 class SignatureImageView(LoginRequiredMixin, View):
     def get(self, request, pk):
         signature = get_object_or_404(
-            MaintenanceSignature.objects.select_related("task__order", "document"), pk=pk
+            MaintenanceSignature.objects.select_related("task__order", "document__order"), pk=pk
         )
         task = signature.task
-        _allowed(type(task.order), request.user, "view", task.order_id)
-        _allowed(type(task), request.user, "view", task.pk)
+        _allowed(type(signature.document.order), request.user, "view", signature.document.order_id)
+        if task:
+            _allowed(type(task), request.user, "view", task.pk)
         _allowed(type(signature.document), request.user, "view", signature.document_id)
         published = (
-            task.status == "completed" and task.evidence.get("signature", {}).get("image_id") == pk
+            bool(signature.submitted_at)
+            if task is None
+            else task.status == "completed"
+            and task.evidence.get("signature", {}).get("image_id") == pk
         )
         if not signature.image or (not published and request.user.pk != signature.signer_id):
             raise Http404

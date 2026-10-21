@@ -1,0 +1,33 @@
+{% with diagram=detail.approval_diagram %}
+{% if diagram %}
+<div class="oa-flow oa-approval-flow">
+  <div class="oa-flow-viewport" tabindex="0" aria-label="工单审批经过流程图，可滚动查看">
+    <svg class="oa-flow-svg" xmlns="http://www.w3.org/2000/svg" width="{{ diagram.width }}" height="{{ diagram.height }}" viewBox="0 0 {{ diagram.width }} {{ diagram.height }}" role="img" aria-labelledby="oa-approval-flow-title">
+      <title id="oa-approval-flow-title">{{ detail.order.number }}完整审批经过</title>
+      <defs>
+        <marker id="oa-approval-next" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="oa-flow-arrow"/></marker>
+        <marker id="oa-approval-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="oa-flow-back-arrow"/></marker>
+      </defs>
+      {% for lane in diagram.lanes %}<rect class="oa-flow-lane" x="{{ lane.x }}" y="10" width="350" height="{{ diagram.lane_height }}" rx="12"/><text class="oa-flow-stage" x="{{ lane.title_x }}" y="46">{{ forloop.counter }}. {{ lane.name }}</text><text class="oa-flow-caption" x="{{ lane.title_x }}" y="70">{{ lane.count }} 个节点</text>{% endfor %}
+      {% for edge in diagram.edges %}<path class="oa-flow-edge" d="{{ edge.path }}" marker-end="url(#oa-approval-next)"/>{% endfor %}
+      {% for edge in diagram.returns %}<path class="oa-flow-back" d="{{ edge.path }}" marker-end="url(#oa-approval-back)"><title>{{ edge.label }}</title></path>{% endfor %}
+      <text class="oa-flow-terminal" x="{{ diagram.start_x }}" y="110">开始办理</text>
+      {% for node in diagram.nodes %}
+      <g class="oa-flow-node {{ node.kind }} oa-history-{{ node.state }}">
+        <title>{{ node.name }}{% for attempt in node.attempts %}&#10;{{ attempt.name }} · {{ attempt.actor }} · {{ attempt.status }}{% if attempt.time %} · {{ attempt.time|date:'Y年n月j日 H:i' }}{% endif %}{% if attempt.comment %} · {{ attempt.comment }}{% endif %}{% endfor %}</title>
+        <rect x="{{ node.x }}" y="{{ node.y }}" width="260" height="{{ node.height }}" rx="10"/>
+        <text class="oa-flow-number" x="{{ node.number_x }}" y="{{ node.number_y }}">{{ node.position }}</text>
+        <text class="oa-approval-state" x="{{ node.x|add:'248' }}" y="{{ node.number_y }}">{{ node.state_label }}</text>
+        {% for line in node.label_lines %}<text class="oa-flow-name" x="{{ node.cx }}" y="{{ line.y }}">{{ line.text }}</text>{% endfor %}
+        {% for attempt in node.attempts %}
+        <text class="oa-flow-role" x="{{ node.cx }}" y="{{ attempt.actor_y }}">{{ attempt.actor }}{% if node.attempts|length > 1 %} · {{ attempt.status }}{% endif %}</text>
+        {% if attempt.time %}<text class="oa-flow-role" x="{{ node.cx }}" y="{{ attempt.time_y }}">{{ attempt.time|date:'Y年n月j日 H:i' }}</text>{% endif %}
+        {% empty %}{% if node.return_only %}<text class="oa-flow-role" x="{{ node.cx }}" y="{{ node.empty_y }}">仅退回时进入</text>{% endif %}{% endfor %}
+      </g>
+      {% endfor %}
+      <text class="oa-flow-terminal" x="{{ diagram.end_x }}" y="{{ diagram.end_y }}">{% if detail.order.status == 'completed' %}工单完成{% elif detail.order.status == 'terminated' %}流程已终止{% elif detail.order.status == 'cancelled' %}流程已撤销{% else %}后续办理{% endif %}</text>
+    </svg>
+  </div>
+</div>
+{% endif %}
+{% endwith %}

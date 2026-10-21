@@ -1,10 +1,40 @@
 {% extends 'generic/object_edit.html' %}
-{% load form_helpers %}
-
-{% block title %}添加一个新的维护服务工单{% endblock %}
-
-{% block form %}
-  {% include 'netbox_oa/maintenance/contract_fields.html' %}
-  {% render_errors form %}
-  {{ block.super }}
+{% load form_helpers static %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="tab-pane show active" id="edit-form" role="tabpanel" aria-labelledby="edit-form-tab">
+  <form action="" method="post" enctype="multipart/form-data" class="object-edit mt-5">
+    {% csrf_token %}
+    <div id="form_fields" hx-disinherit="hx-select hx-swap">
+      {% include 'netbox_oa/maintenance/contract_fields.html' %}
+      {% render_errors form %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      <div class="field-group mb-5">
+      {% for field in form.visible_fields %}
+        {% if field.name not in form.meta_fields %}{% render_field field %}{% endif %}
+      {% endfor %}
+      {% if signing_form %}
+      <input type="hidden" name="expected_document_id" value="{{ expected_document_id }}">
+      <div class="row mb-3 align-items-center oa-applicant-signature">
+        <div class="col-sm-3 text-lg-end"><span class="col-form-label d-inline-block">申请人签名</span></div>
+        <div class="col">{% include 'netbox_oa/maintenance/signature_widget.html' %}</div>
+      </div>
+      <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
+      <script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}?v=20261018-2" defer></script>
+      {% endif %}
+      </div>
+      <div class="bg-primary-subtle border border-primary rounded-1 pt-3 px-3 mb-3">
+        {% render_field form.changelog_message %}
+      </div>
+    </div>
+    <div class="btn-float-group-right">
+      <a class="btn btn-ghost-secondary btn-float" href="{{ return_url }}">取消</a>
+      <div class="btn-group" role="group" aria-label="工单操作">
+        <button class="btn btn-primary" type="submit" name="_submit">提交审批</button>
+        <button class="btn btn-ghost-primary" type="submit" name="_save">{% if correction_form %}保存修改{% else %}保存草稿{% endif %}</button>
+        {% if can_add_another %}<button class="btn btn-ghost-primary btn-float" type="submit" name="_addanother">保存草稿并添加另一个</button>{% endif %}
+      </div>
+    </div>
+  </form>
+</div>
 {% endblock %}

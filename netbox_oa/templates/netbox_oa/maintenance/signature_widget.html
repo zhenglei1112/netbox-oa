@@ -1,16 +1,18 @@
 <div class="oa-signature-widget" data-signature-widget
-     data-create-url="{% url 'plugins:netbox_oa:maintenance_signature_create' pk=detail.current.pk %}"
+     data-create-url="{% if signing_form %}{{ signature_save_url }}{% else %}{% url 'plugins:netbox_oa:maintenance_signature_create' pk=detail.current.pk %}{% endif %}"
+     {% if signing_form %}data-save-form="true"{% endif %}
+     data-signed="{% if detail.mobile_signature.uploaded_at %}1{% else %}0{% endif %}"
      {% if detail.mobile_signature %}data-action-url="{% url 'plugins:netbox_oa:maintenance_signature' pk=detail.mobile_signature.pk %}"{% endif %}>
-  <button type="button" class="oa-signature-add" data-signature-add {% if detail.mobile_signature.uploaded_at %}hidden{% endif %}><i class="mdi mdi-pencil-outline" aria-hidden="true"></i> 添加签名</button>
+  <button type="button" class="btn btn-ghost-primary oa-signature-add" data-signature-add {% if detail.mobile_signature.uploaded_at %}hidden{% endif %}><i class="mdi mdi-pencil-outline" aria-hidden="true"></i> 添加签名</button>
   <span class="oa-signature-value" data-signature-value {% if not detail.mobile_signature.uploaded_at %}hidden{% endif %}>
     <img data-signature-image {% if detail.mobile_signature.uploaded_at %}src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=detail.mobile_signature.pk %}"{% endif %} alt="你的手写签名">
-    <button type="button" class="oa-signature-delete" data-signature-delete aria-label="删除签名" title="删除签名">×</button>
+    <button type="button" class="btn btn-ghost-danger oa-signature-delete" data-signature-delete aria-label="删除签名" title="删除签名">×</button>
   </span>
-  <p class="text-danger" data-signature-feedback role="alert"></p>
+  <p class="text-danger mb-0" data-signature-feedback role="alert"></p>
   <dialog class="oa-signature-dialog" data-signature-dialog aria-label="添加签名">
-    <button type="button" class="oa-signature-close" data-signature-close aria-label="关闭二维码">×</button>
+    <button type="button" class="btn btn-ghost-secondary oa-signature-close" data-signature-close aria-label="关闭二维码">×</button>
     <img data-signature-qr alt="签字二维码" width="220" height="220">
     <p data-signature-hint>扫描二维码，添加签名</p>
-    <small>二维码有效期 15 分钟</small>
+    <button type="button" class="btn btn-ghost-primary" data-signature-reuse hidden>使用已保存签名</button>
   </dialog>
 </div>

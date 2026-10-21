@@ -8,6 +8,7 @@ import sys
 import types
 from pathlib import Path
 
+from django import forms
 from django.apps import AppConfig
 
 SECRET_KEY = "local-tests-only"
@@ -65,6 +66,20 @@ plugins = types.ModuleType("netbox.plugins")
 plugins.PluginConfig = AppConfig
 sys.modules["netbox"] = netbox
 sys.modules["netbox.plugins"] = plugins
+
+class ChangelogMessageMixin(forms.Form):
+    changelog_message = forms.CharField(required=False, max_length=200)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.meta_fields = ["changelog_message"]
+
+
+netbox_forms = types.ModuleType("netbox.forms")
+netbox_form_mixins = types.ModuleType("netbox.forms.mixins")
+netbox_form_mixins.ChangelogMessageMixin = ChangelogMessageMixin
+sys.modules["netbox.forms"] = netbox_forms
+sys.modules["netbox.forms.mixins"] = netbox_form_mixins
 
 # Create the base model lazily: model classes require Django's app registry.
 base = types.ModuleType("netbox.models")

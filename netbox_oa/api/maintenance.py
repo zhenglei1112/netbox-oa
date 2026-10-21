@@ -83,11 +83,6 @@ class OrderSerializer(ValidatedModelSerializer):
             "current_position",
             "steps_snapshot",
             "payment_status",
-            "payment_amount",
-            "period_start",
-            "period_end",
-            "settlement_period_mode",
-            "contract_payment_id",
             "completed_at",
             "created",
             "last_updated",
@@ -103,11 +98,6 @@ class OrderSerializer(ValidatedModelSerializer):
             "current_position",
             "steps_snapshot",
             "payment_status",
-            "payment_amount",
-            "period_start",
-            "period_end",
-            "settlement_period_mode",
-            "contract_payment_id",
             "completed_at",
         )
 
@@ -144,10 +134,6 @@ class TaskActionSerializer(serializers.Serializer):
         max_length=200, required=False, allow_blank=True, default=""
     )
     user_id = serializers.IntegerField(min_value=1, required=False)
-    payment_amount = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
-    period_start = serializers.CharField(required=False)
-    period_end = serializers.CharField(required=False)
-    settlement_period_mode = serializers.ChoiceField(choices=("day", "month"), required=False)
 
 
 class DocumentSerializer(ValidatedModelSerializer):
@@ -159,6 +145,9 @@ class DocumentSerializer(ValidatedModelSerializer):
             "order",
             "material",
             "version",
+            "item_number",
+            "replaces_document",
+            "display_name",
             "original_name",
             "kind",
             "form_data",
@@ -174,6 +163,8 @@ class DocumentSerializer(ValidatedModelSerializer):
 
 
 class DocumentWriteSerializer(serializers.Serializer):
+    replaces_document_id = serializers.IntegerField(min_value=1, required=False)
+    upload_mode = serializers.ChoiceField(choices=("new", "replace"), required=False)
     source_document_id = serializers.IntegerField(min_value=1, required=False)
     order_id = serializers.IntegerField(min_value=1)
     material = serializers.ChoiceField(
@@ -182,15 +173,6 @@ class DocumentWriteSerializer(serializers.Serializer):
     state = serializers.ChoiceField(
         choices=MaintenanceDocument._meta.get_field("state").choices, default="electronic"
     )
-
-    def to_internal_value(self, data):
-        # Accept legacy clients, while exposing only the two current choices.
-        data = data.copy()
-        if "state" in data:
-            data["state"] = {"paper": "scan", "sealed": "scan", "awaiting_paper": "electronic"}.get(
-                data["state"], data["state"]
-            )
-        return super().to_internal_value(data)
 
     file = serializers.FileField()
     note = serializers.CharField(required=False, allow_blank=True, default="")
@@ -304,10 +286,6 @@ class TaskViewSet(TransitionViewMixin, NetBoxReadOnlyModelViewSet):
             "complete": (
                 "comment",
                 "external_reference",
-                "payment_amount",
-                "period_start",
-                "period_end",
-                "settlement_period_mode",
             ),
             "return": ("comment",),
             "transfer": ("user_id", "comment"),

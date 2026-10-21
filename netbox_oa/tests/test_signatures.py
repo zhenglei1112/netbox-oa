@@ -43,6 +43,71 @@ class SignatureTests(TestCase):
     def url(self, name, **kwargs):
         return reverse("plugins:netbox_oa:maintenance_signature" + name, kwargs=kwargs)
 
+    def test_mobile_saved_signature_is_opt_in_and_bound_to_signer_id(self):
+        from netbox_oa.models import MaintenanceSavedSignature
+
+        session = self.session()
+        token = signatures.mobile_token(session)
+        url = self.url("_mobile", token=token)
+        phone = Client(enforce_csrf_checks=True)
+        self.assertContains(phone.get(url), "保存签名以供下次使用")
+        self.assertNotContains(phone.get(url), "data-signature-reuse=")
+        invalid = phone.post(
+            url,
+            {
+                "submission_token": signatures.submission_token(session),
+                "image_data": image_data(blank=True),
+                "save_signature": "on",
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(MaintenanceSavedSignature.objects.exists())
+        response = phone.post(
+            url,
+            {
+                "submission_token": signatures.submission_token(session),
+                "image_data": image_data(),
+                "save_signature": "on",
+            },
+        )
+        self.assertContains(response, "签名已提交")
+        saved = MaintenanceSavedSignature.objects.get(signer=self.actor)
+        session.refresh_from_db()
+        self.assertEqual(bytes(saved.image), bytes(session.image))
+        signatures.cancel_signature(pk=session.pk, actor=self.actor)
+        next_session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        next_url = self.url("_mobile", token=signatures.mobile_token(next_session))
+        self.assertNotContains(phone.get(next_url), "使用已保存签名")
+        desktop = Client(enforce_csrf_checks=True)
+        desktop.force_login(self.actor)
+        action_url = self.url("", pk=next_session.pk)
+        self.assertContains(desktop.get(action_url), "使用已保存签名")
+        self.assertEqual(desktop.post(action_url, {"operation": "reuse"}).status_code, 403)
+        desktop = Client()
+        desktop.force_login(self.actor)
+        response = desktop.post(action_url, {"operation": "reuse"}, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.json()["state"], "uploaded")
+        next_session.refresh_from_db()
+        self.assertEqual(bytes(next_session.image), bytes(saved.image))
+        self.assertIsNone(next_session.confirmed_at)
+        self.assertEqual(Client().post(action_url, {"operation": "reuse"}).status_code, 302)
+        other = type(self.actor).objects.create_user("other_saved_signer")
+        desktop.force_login(other)
+        self.assertEqual(desktop.post(action_url, {"operation": "reuse"}).status_code, 403)
+        signatures.cancel_signature(pk=next_session.pk, actor=self.actor)
+        next_session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        next_url = self.url("_mobile", token=signatures.mobile_token(next_session))
+        # A different account's saved ink must never appear in this grant.
+        saved.signer = other
+        saved.save()
+        self.assertNotContains(phone.get(next_url), "data-signature-reuse=")
+        with self.assertRaisesMessage(ValidationError, "暂无已保存签名"):
+            signatures.reuse_signature(pk=next_session.pk, actor=self.actor)
+        signatures.capture_signature(
+            token=signatures.mobile_token(next_session), data_url=image_data()
+        )
+        self.assertFalse(MaintenanceSavedSignature.objects.filter(signer=self.actor).exists())
+
     def test_mobile_capture_csrf_desktop_confirm_and_print(self):
         session = self.session()
         desktop = Client()
@@ -343,7 +408,8 @@ class SignatureTests(TestCase):
     def test_applicant_signature_required_in_ui_api_and_print(self):
         from rest_framework.test import APIClient
 
-        self.start()
+        self.reach("order_review")
+        services.return_task(pk=self.current().pk, actor=self.actor, comment="修正工单")
         document = self.upload("order")
         self.client.force_login(self.actor)
         page = self.client.get(self.order.get_absolute_url())
@@ -365,11 +431,12 @@ class SignatureTests(TestCase):
         printed = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
-        self.assertContains(printed, "申请人签字")
+        self.assertContains(printed, "<th>申请人</th>", html=True)
         self.assertContains(printed, self.url("_image", pk=session.pk))
 
     def test_applicant_signature_must_be_replaced_after_revision_or_deletion(self):
-        self.start()
+        self.reach("order_review")
+        services.return_task(pk=self.current().pk, actor=self.actor, comment="修正工单")
         self.upload("order")
         session = signatures.create_session(pk=self.current().pk, actor=self.actor)
         signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
@@ -384,40 +451,3 @@ class SignatureTests(TestCase):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         self.complete()
         self.assertEqual(self.current().name, "工单初审")
-
-    def test_applicant_alone_signs_after_existing_initial_task_migration(self):
-        from importlib import import_module
-
-        from django.apps import apps
-        from django.contrib.auth import get_user_model
-
-        from netbox_oa.models import MaintenanceOrder
-
-        self.start()
-        self.upload("order")
-        applicant = get_user_model().objects.create_user(
-            username="actual_applicant", password="test"
-        )
-        for model, action in (
-            ("maintenancetask", "change"),
-            ("maintenanceorder", "view"),
-            ("maintenancedocument", "view"),
-        ):
-            test_maintenance.MaintenanceTests.grant(self, applicant, model, action)
-        order = MaintenanceOrder.objects.get(pk=self.order.pk)
-        order.requester = applicant
-        order.steps_snapshot[order.current_position]["role"] = "owner"
-        order.save()
-        migration = import_module("netbox_oa.migrations.0018_requester_order_start")
-        migration.assign_applicant(
-            apps, SimpleNamespace(connection=SimpleNamespace(alias="default"))
-        )
-        self.assertEqual(self.current().assigned_user_id, applicant.pk)
-        with self.assertRaisesMessage(PermissionDenied, "申请人本人签名"):
-            signatures.create_session(pk=self.current().pk, actor=self.actor)
-        session = signatures.create_session(pk=self.current().pk, actor=applicant)
-        signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
-        task = services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertEqual(task.evidence["signature"]["user_id"], applicant.pk)
-        self.assertEqual(task.evidence["signature"]["image_id"], session.pk)
-        self.assertEqual(task.decided_by_id, self.actor.pk)

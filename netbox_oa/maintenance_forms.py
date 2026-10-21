@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from netbox.forms.mixins import ChangelogMessageMixin
 from users.models import Group
 
 from .maintenance_contracts import (
@@ -70,11 +71,9 @@ class ContractFieldsMixin:
         self.contract_options = {str(item.pk): contract_values(item, actor) for item in contracts}
         self.fields["supplier"].required = False
         self.fields["supplier"].widget.attrs["readonly"] = True
-        self.fields["supplier"].help_text = "选择外购合同后自动带入"
         self.fields["service_region"] = forms.ModelMultipleChoiceField(
             label="服务省市",
             queryset=service_regions(actor),
-            help_text="从 NetBox 地区中选择，可多选；合同自动带入后仍可调整。",
         )
         if not self.is_bound:
             instance = getattr(self, "instance", None)
@@ -106,7 +105,7 @@ class ContractFieldsMixin:
         return data
 
 
-class MaintenanceOrderForm(ContractFieldsMixin, StyledForm, forms.ModelForm):
+class MaintenanceOrderForm(ContractFieldsMixin, StyledForm, ChangelogMessageMixin, forms.ModelForm):
     number = forms.CharField(label="工单编号", disabled=True, required=False)
     number_token = forms.CharField(widget=forms.HiddenInput)
 
@@ -176,26 +175,6 @@ class MaintenanceActionForm(StyledForm, forms.Form):
         widget=forms.Textarea(attrs={"rows": 2}),
     )
     external_reference = forms.CharField(label="EIP / 财务业务单号", max_length=200, required=False)
-    payment_amount = forms.DecimalField(
-        label="付款金额", max_digits=14, decimal_places=2, required=False
-    )
-    period_start = forms.CharField(
-        label="结算期起始日期",
-        required=False,
-        widget=forms.TextInput(attrs={"placeholder": "YYYY-MM-DD 或 YYYY-MM"}),
-    )
-    period_end = forms.CharField(
-        label="结算期结束日期",
-        required=False,
-        widget=forms.TextInput(attrs={"placeholder": "YYYY-MM-DD 或 YYYY-MM"}),
-    )
-    settlement_period_mode = forms.ChoiceField(
-        label="结算期填写方式",
-        choices=(("day", "按日"), ("month", "按月")),
-        required=False,
-        initial="day",
-        help_text="按日填写 YYYY-MM-DD；按月填写 YYYY-MM，按月初至月末结算。",
-    )
     user_id = forms.ModelChoiceField(
         label="转办 / 加签人员",
         required=False,
@@ -207,29 +186,88 @@ class MaintenanceActionForm(StyledForm, forms.Form):
         self.style_fields()
 
 
-class MultipleScanInput(forms.ClearableFileInput):
+class MultipleUploadInput(forms.ClearableFileInput):
     allow_multiple_selected = True
 
 
-class MultipleScanField(forms.FileField):
-    widget = MultipleScanInput
+class MultipleUploadField(forms.FileField):
+    widget = MultipleUploadInput
 
     def clean(self, data, initial=None):
         files = data if isinstance(data, (list, tuple)) else [data]
-        return [super(MultipleScanField, self).clean(file, initial) for file in files]
+        return [super(MultipleUploadField, self).clean(file, initial) for file in files]
 
 
 class MaintenanceScanUploadForm(StyledForm, forms.Form):
-    file = MultipleScanField(
-        label="扫描版服务报告（可多选）",
-        widget=MultipleScanInput(attrs={"accept": ".pdf,.png,.jpg,.jpeg"}),
+    file = MultipleUploadField(
+        label="扫描版服务报告",
+        widget=MultipleUploadInput(attrs={"accept": ".pdf,.png,.jpg,.jpeg"}),
     )
     note = forms.CharField(label="备注", required=False, widget=forms.Textarea(attrs={"rows": 2}))
 
     def __init__(self, *args, material_name="服务报告", **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["file"].label = f"扫描版{material_name}（可多选）"
+        self.fields["file"].label = f"扫描版{material_name}"
         self.style_fields()
+
+class UploadSourceSelect(forms.Select):
+    def value_from_datadict(self, data, files, name):
+        return data.getlist(name)
+
+
+class MaintenanceMaterialUploadForm(MaintenanceScanUploadForm):
+    upload_mode = forms.ChoiceField(
+        label="本次操作", choices=(("new", "新增材料"), ("replace", "更新已有材料")),
+        required=False, initial="new",
+    )
+    replaces_document_ids = forms.TypedMultipleChoiceField(
+        label="更新哪份材料", coerce=int, required=False, widget=UploadSourceSelect,
+    )
+    source_document_ids = forms.TypedMultipleChoiceField(
+        label="对应原件", coerce=int, required=False, widget=UploadSourceSelect,
+    )
+
+    def __init__(
+        self, *args, scan=False, source_choices=(), requires_source=False,
+        revision_choices=(), allow_revision=False, multiple=True, **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.requires_source = requires_source
+        self.allow_revision = allow_revision
+        self.multiple = multiple
+        self.fields["replaces_document_ids"].choices = revision_choices
+        self.fields["replaces_document_ids"].widget.attrs["disabled"] = True
+        self.fields["source_document_ids"].choices = source_choices
+        self.fields["source_document_ids"].required = requires_source
+        if not scan:
+            self.fields["file"].label = "材料文件（可多选）"
+            self.fields["file"].widget.attrs["accept"] = ".pdf,.docx,.xlsx,.png,.jpg,.jpeg"
+        if not multiple:
+            self.fields["file"].widget = forms.ClearableFileInput(attrs={
+                "accept": self.fields["file"].widget.attrs.get("accept", ""),
+            })
+        self.style_fields()
+
+    def clean(self):
+        data = super().clean()
+        if not self.multiple and len(self.files.getlist("file")) > 1:
+            self.add_error("file", "每次只能上传一个文件。")
+        if self.allow_revision:
+            data["upload_mode"] = data.get("upload_mode") or "new"
+            replacements = data.get("replaces_document_ids", [])
+            if data["upload_mode"] == "replace":
+                if len(replacements) != len(data.get("file", [])) or not replacements:
+                    self.add_error("replaces_document_ids", "请为每个文件选择要更新的材料。")
+                elif len(replacements) != len(set(replacements)):
+                    self.add_error("replaces_document_ids", "同一份材料不能重复更新。")
+            elif replacements:
+                self.add_error("replaces_document_ids", "新增材料不能指定更新对象。")
+        if self.requires_source and "file" in data and "source_document_ids" in data:
+            if len(data["file"]) != len(data["source_document_ids"]):
+                self.add_error("source_document_ids", "请为每个文件选择对应原件。")
+            elif len(data["source_document_ids"]) != len(set(data["source_document_ids"])):
+                self.add_error("source_document_ids", "同一审批件不能重复关联用印文件。")
+        return data
 
 
 class MaintenanceDocumentForm(StyledForm, forms.ModelForm):
@@ -241,12 +279,6 @@ class MaintenanceDocumentForm(StyledForm, forms.ModelForm):
         labels = {"material": "材料类型", "file": "材料文件", "state": "材料形态", "note": "备注"}
 
     def __init__(self, *args, scan=False, **kwargs):
-        if args and args[0] is not None:
-            data = args[0].copy()
-            data["state"] = {"paper": "scan", "sealed": "scan", "awaiting_paper": "electronic"}.get(
-                data.get("state"), data.get("state")
-            )
-            args = (data, *args[1:])
         super().__init__(*args, **kwargs)
         self.fields["state"].choices = [
             choice
@@ -261,6 +293,11 @@ class MaintenanceDocumentForm(StyledForm, forms.ModelForm):
         self.fields["file"].required = True
         self.fields["note"].widget.attrs["rows"] = 2
         self.style_fields()
+
+    def clean_file(self):
+        if len(self.files.getlist("file")) > 1:
+            raise forms.ValidationError("每次只能上传一个文件。")
+        return self.cleaned_data["file"]
 
 
 class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):

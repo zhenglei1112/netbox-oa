@@ -25,7 +25,9 @@ class ReportTests(TestCase):
         return [SimpleUploadedFile(name, b"scan") for name in ("report-one.pdf", "report-two.jpg")]
 
     def batch(self):
-        return services.upload_report_scans(pk=self.order.pk, actor=self.actor, files=self.files())
+        return services.upload_material_scans(
+            material="report", pk=self.order.pk, actor=self.actor, files=self.files()
+        )
 
     def test_exact_four_nodes_and_configured_roles(self):
         nodes = [
@@ -66,6 +68,10 @@ class ReportTests(TestCase):
             task = services.complete_task(pk=self.current().pk, actor=self.actor)
             self.assertEqual(set(task.evidence["report"]), expected)
         self.assertEqual(self.current().name, "服务报告用印")
+        with self.assertRaises(ValidationError) as missing:
+            services.complete_task(pk=self.current().pk, actor=self.actor)
+        for scan in scans:
+            self.assertIn(scan.short_name, str(missing.exception))
         stamped = []
         for scan in scans:
             with self.assertRaisesMessage(ValidationError, "每份服务报告"):
@@ -91,7 +97,7 @@ class ReportTests(TestCase):
         original = self.batch()
         self.complete()
         with self.assertRaisesMessage(ValidationError, "审批期间不能修改"):
-            self.upload("report", "paper")
+            self.upload("report", "scan")
         services.return_task(pk=self.current().pk, actor=self.actor, comment="请补全报告")
         with self.assertRaises(ValidationError):
             services.complete_task(pk=self.current().pk, actor=self.actor)
@@ -107,29 +113,33 @@ class ReportTests(TestCase):
         self.reach("report_fill")
         files = [*self.files(), SimpleUploadedFile("invalid.docx", b"not scan")]
         with self.assertRaisesMessage(ValidationError, "扫描件仅支持"):
-            services.upload_report_scans(pk=self.order.pk, actor=self.actor, files=files)
+            services.upload_material_scans(
+                material="report", pk=self.order.pk, actor=self.actor, files=files
+            )
         self.assertFalse(self.order.documents.filter(material="report").exists())
         self.assertEqual(self.current().assigned_user_id, self.order.requester_id)
         self.assertIsNone(self.current().started_at)
 
-    def test_web_multi_upload_and_all_current_files_visible(self):
+    def test_web_multiple_upload_and_all_current_files_visible(self):
         self.reach("report_fill")
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_upload", args=[self.order.pk])
-        response = self.client.post(url, {"report_scans": "1", "file": self.files()})
+        response = self.client.post(url, {"scan_material": "report", "file": self.files()})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.order.documents.filter(material="report", kind="scan").count(), 2)
         page = self.client.get(self.order.get_absolute_url())
         self.assertContains(page, "report-one.pdf")
         self.assertContains(page, "report-two.jpg")
-        self.assertContains(page, "multiple")
         self.assertContains(page, "本次服务报告 · 2 份")
+        upload_url = reverse("plugins:netbox_oa:maintenance_material_upload",
+                             args=[self.order.pk, "report"])
+        self.assertContains(self.client.get(upload_url), "multiple")
         self.complete()
         self.complete()
         self.complete()
-        page = self.client.get(self.order.get_absolute_url())
+        page = self.client.get(upload_url)
         for scan in services.report_scan_sources(MaintenanceOrder.objects.get(pk=self.order.pk)):
-            self.assertContains(page, f'name="source_document_id" value="{scan.pk}"')
+            self.assertContains(page, f'value="{scan.pk}"')
 
     def test_api_enforces_scan_upload_without_electronic_source(self):
         self.reach("report_fill")
@@ -164,52 +174,3 @@ class ReportTests(TestCase):
         self.assertFalse(response.data["is_sealed"])
         self.assertEqual(response.data["uploaded_task"], self.current().pk)
         self.assertIsNone(response.data["source_document"])
-
-    def test_legacy_snapshot_preserves_electronic_submission(self):
-        self.reach("report_fill")
-        order = MaintenanceOrder.objects.get(pk=self.order.pk)
-        node = order.steps_snapshot[order.current_position]
-        node.pop("report_scans")
-        node["required"] = [["report", "electronic"]]
-        order.save()
-        document = services.upload_document(
-            pk=order.pk,
-            actor=self.actor,
-            material="report",
-            file=SimpleUploadedFile("legacy.docx", b"document"),
-        )
-        task = services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertEqual(task.evidence["report"], document.pk)
-
-    def test_two_state_choices_and_legacy_state_migration(self):
-        from importlib import import_module
-        from types import SimpleNamespace
-
-        from django.apps import apps
-
-        self.assertEqual(
-            MaintenanceDocument._meta.get_field("state").choices,
-            [("electronic", "电子版"), ("scan", "扫描版")],
-        )
-        self.reach("report_fill")
-        scans = self.batch()
-        # Simulate pre-migration rows without changing source relationships or evidence.
-        MaintenanceDocument.objects.filter(pk=scans[0].pk).update(state="sealed")
-        MaintenanceDocument.objects.filter(pk=scans[1].pk).update(state="paper")
-        migration = import_module("netbox_oa.migrations.0013_document_scan_states")
-        migration.normalize_states(
-            apps, SimpleNamespace(connection=SimpleNamespace(alias="default"))
-        )
-        scans[0].refresh_from_db()
-        scans[1].refresh_from_db()
-        self.assertEqual(scans[0].state, "scan")
-        self.assertTrue(scans[0].is_sealed)
-        self.assertEqual(scans[1].state, "scan")
-        self.assertFalse(scans[1].is_sealed)
-        self.assertIsNone(scans[0].source_document_id)
-
-    def test_legacy_upload_values_are_normalized(self):
-        self.reach("report_fill")
-        document = self.upload("report", "paper")
-        self.assertEqual(document.state, "scan")
-        self.assertFalse(document.is_sealed)

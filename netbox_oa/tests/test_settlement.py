@@ -76,43 +76,6 @@ class SettlementTests(TestCase):
             [node["role"] for node in payment_nodes], ["requester", "department", "owner"]
         )
 
-    def test_existing_instance_group_migration_preserves_progress_and_rules(self):
-        from copy import deepcopy
-        from importlib import import_module
-        from types import SimpleNamespace
-
-        from django.apps import apps
-
-        self.reach("payment_review")
-        order = self.order_now()
-        task = self.current()
-        for node in order.steps_snapshot:
-            if node["key"] in {"payment_plan", "payment_review"}:
-                node["stage"] = "settlement"
-        order.stage = "settlement"
-        order.save()
-        expected = deepcopy(order.steps_snapshot)
-        for node in expected:
-            if node["key"] in {"payment_plan", "payment_review"}:
-                node["stage"] = "payment"
-        migration = import_module("netbox_oa.migrations.0016_payment_step_group")
-        migration.forwards(apps, SimpleNamespace(connection=SimpleNamespace(alias="default")))
-        order.refresh_from_db()
-        self.assertEqual(order.steps_snapshot, expected)
-        self.assertEqual(order.stage, "payment")
-        self.assertEqual(order.current_position, task.position)
-        self.assertEqual(self.current().pk, task.pk)
-        self.assertEqual(self.current().status, "pending")
-        services.return_task(pk=task.pk, actor=self.actor, comment="请核对付款")
-        self.assertEqual(self.order_now().stage, "payment")
-        self.assertEqual(self.order_now().payment_status, "draft")
-        self.assertEqual(self.current().name, "生成付款")
-        self.assertFalse(self.current().evidence["correction_baseline"])
-        self.complete()
-        self.complete()
-        self.assertEqual(self.current().name, "付款")
-        self.assertEqual(self.order_now().payment_status, "submitted")
-
     def test_scanned_settlement_is_required_but_period_is_not(self):
         self.reach("settlement_fill")
         with self.assertRaisesMessage(ValidationError, "扫描版服务结算单"):
@@ -126,35 +89,18 @@ class SettlementTests(TestCase):
             )
         self.upload("settlement")
         task = services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertIsNone(self.order_now().period_start)
-        self.assertIsNone(self.order_now().period_end)
         self.assertNotIn("settlement_period", task.evidence)
         self.assertEqual(self.current().name, "服务结算单用印部门审核")
-
-    def test_upload_ignores_period_parameters(self):
-        self.reach("settlement_fill")
-        self.upload("settlement")
-        services.complete_task(
-            pk=self.current().pk,
-            actor=self.actor,
-            settlement_period_mode="month",
-            period_start="2026-07",
-            period_end="2026-09",
-        )
-        self.assertIsNone(self.order_now().period_start)
-        self.assertIsNone(self.order_now().period_end)
 
     def test_settlement_return_requires_new_scan_and_reapproval(self):
         self.reach("settlement_department_seal")
         with self.assertRaisesMessage(ValidationError, "审批期间不能修改"):
-            self.upload("settlement", "paper")
+            self.upload("settlement", "scan")
         services.return_task(pk=self.current().pk, actor=self.actor, comment="补全结算单")
         with self.assertRaises(ValidationError):
             services.complete_task(
                 pk=self.current().pk,
                 actor=self.actor,
-                period_start="2026-08-01",
-                period_end="2026-08-31",
             )
         self.upload("settlement")
         self.complete()
@@ -192,9 +138,6 @@ class SettlementTests(TestCase):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         self.assertEqual(self.order_now().stage, "payment")
         self.assertFalse(Invoice.objects.exists())
-        self.assertIsNone(self.order_now().contract_payment_id)
-        self.assertIsNone(self.order_now().payment_amount)
-        self.assertIsNone(self.order_now().period_start)
 
     def test_external_payment_validation_does_not_block_oa_submission(self):
         self.reach("payment_plan")
@@ -265,19 +208,6 @@ class SettlementTests(TestCase):
         services.complete_task(pk=self.current().pk, actor=self.actor)
         self.assertEqual(self.order_now().stage, "payment")
 
-    def test_old_payment_snapshot_is_preserved_without_revalidation(self):
-        self.reach("payment_review")
-        payment = self.new_payment()
-        order = self.order_now()
-        order.contract_payment_id = payment.pk
-        order.contract_payment_snapshot = {"id": payment.pk, "amount": "8000.00"}
-        order.save()
-        payment.amount = Decimal("9000.00")
-        payment.save()
-        task = services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertNotIn("contract_payment", task.evidence)
-        self.assertEqual(self.order_now().contract_payment_snapshot["amount"], "8000.00")
-
     def test_api_and_web_upload_need_no_period_fields(self):
         self.reach("settlement_fill")
         self.client.force_login(self.actor)
@@ -294,7 +224,10 @@ class SettlementTests(TestCase):
         self.assertNotContains(page, 'name="period_start"')
         self.assertNotContains(page, 'name="period_end"')
         self.assertContains(page, "上传服务结算单")
-        self.assertContains(page, "上传扫描版服务结算单")
+        upload_page = self.client.get(reverse(
+            "plugins:netbox_oa:maintenance_material_upload", args=[self.order.pk, "settlement"]
+        ))
+        self.assertNotContains(upload_page, "退回补正后，请重新上传")
         api = APIClient()
         api.force_authenticate(self.actor)
         response = api.post(
@@ -303,21 +236,3 @@ class SettlementTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(self.order_now().period_end)
-
-    def test_historical_settlement_snapshot_keeps_electronic_submission(self):
-        self.reach("settlement_fill")
-        order = self.order_now()
-        node = order.steps_snapshot[order.current_position]
-        node.pop("scan_material")
-        node.pop("contract_payment")
-        node["required"] = [["settlement", "electronic"]]
-        order.save()
-        document = services.upload_document(
-            pk=order.pk,
-            actor=self.actor,
-            material="settlement",
-            file=SimpleUploadedFile("legacy.xlsx", b"data"),
-        )
-        task = services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertEqual(task.evidence["settlement"], document.pk)

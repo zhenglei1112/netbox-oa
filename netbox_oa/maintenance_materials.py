@@ -2,7 +2,9 @@
 
 from django.utils import timezone
 
-COMPANY_FORMS = {"order": "维护服务工单", "report": "服务报告（甲方部分）"}
+COMPANY_FORMS = {"order": "维护服务工单"}
+# Previously generated report forms remain available for historical viewing.
+PRINTABLE_FORMS = (*COMPANY_FORMS, "report")
 SERVICE_ITEMS = (
     ("fiber", "光缆故障处置"),
     ("construction", "施工盯防"),

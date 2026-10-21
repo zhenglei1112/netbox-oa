@@ -3,10 +3,13 @@
 from textwrap import wrap
 
 
-def build_diagram(stages):
-    lane_width, node_width, node_height, spacing = 360, 260, 94, 136
+def build_diagram(stages, *, node_height=94, node_gap=42):
+    lane_width, node_width = 360, 260
     nodes, lanes, edges, returns = [], [], [], []
-    height = 220 + max(len(stage["nodes"]) for stage in stages) * spacing
+    height = 220 + max(
+        sum(node.get("height", node_height) + node_gap for node in stage["nodes"])
+        for stage in stages
+    )
     for column, stage in enumerate(stages):
         lane_x = column * lane_width + 10
         lanes.append(
@@ -17,16 +20,19 @@ def build_diagram(stages):
                 "count": len(stage["nodes"]),
             }
         )
-        for row, node in enumerate(stage["nodes"]):
-            x, y = lane_x + 80, 144 + row * spacing
+        y = 144
+        for node in stage["nodes"]:
+            x = lane_x + 80
+            actual_height = node.get("height", node_height)
             nodes.append(
                 {
                     **node,
                     "x": x,
                     "y": y,
                     "cx": x + node_width / 2,
-                    "bottom": y + node_height,
-                    "middle": y + node_height / 2,
+                    "height": actual_height,
+                    "bottom": y + actual_height,
+                    "middle": y + actual_height / 2,
                     "label_lines": [
                         {"text": line, "y": y + 29 + index * 20}
                         for index, line in enumerate(wrap(node["name"], 17))
@@ -36,10 +42,12 @@ def build_diagram(stages):
                     "number_y": y + 16,
                 }
             )
+            y += actual_height + node_gap
     by_key = {node["key"]: node for node in nodes}
-    for index, node in enumerate(nodes):
-        if index + 1 < len(nodes):
-            target = nodes[index + 1]
+    main_nodes = [node for node in nodes if not node.get("return_only")]
+    for index, node in enumerate(main_nodes):
+        if index + 1 < len(main_nodes):
+            target = main_nodes[index + 1]
             if node["stage"] == target["stage"]:
                 path = f"M {node['cx']} {node['bottom']} V {target['y'] - 5}"
             else:
@@ -65,7 +73,20 @@ def build_diagram(stages):
                     ),
                 }
             )
-    first, last = nodes[0], nodes[-1]
+    for correction in (node for node in nodes if node.get("return_only")):
+        target = by_key["order_review"]
+        corridor = correction["x"] + 268
+        edges.append(
+            {
+                "source": correction["key"],
+                "target": target["key"],
+                "path": (
+                    f"M {correction['cx']} {correction['bottom']} V {correction['bottom'] + 14} "
+                    f"H {corridor} V {target['middle']} H {target['x'] + node_width + 5}"
+                ),
+            }
+        )
+    first, last = main_nodes[0], main_nodes[-1]
     edges.append(
         {
             "source": "start",

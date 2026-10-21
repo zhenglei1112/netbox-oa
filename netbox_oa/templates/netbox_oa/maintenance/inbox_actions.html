@@ -6,9 +6,9 @@
         <section class="oa-common-actions" aria-label="处理意见与审批操作">
           {{ action_form.comment.as_field_group }}
         <div class="btn-list mt-2">
-          <button class="btn btn-primary" type="submit">{% if detail.current.kind == 'approval' or detail.current.kind == 'countersign' %}同意{% elif detail.current.kind == 'submission' %}提交资料{% elif detail.current.kind == 'external' %}登记外部流程已通过{% else %}确认办理完成{% endif %}</button>
-          {% if detail.can_return %}<button class="btn btn-outline-warning" type="submit" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='return' %}">退回补正</button>{% endif %}
+          <button class="btn btn-primary" type="submit">{% if detail.current.kind == 'approval' or detail.current.kind == 'countersign' %}同意{% elif detail.order_correction %}提交审批{% elif detail.current.kind == 'submission' %}提交资料{% elif detail.current.kind == 'external' %}登记外部流程已通过{% else %}确认办理完成{% endif %}</button>
+          {% if detail.can_return %}<button class="btn btn-ghost-warning" type="submit" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='return' %}">退回补正</button>{% endif %}
         </div>
-        <a class="oa-text-action" data-oa-open="routing" href="{{ detail_url }}&amp;panel=routing">转办{% if detail.current.kind == 'approval' %} / 加签{% endif %} →</a>
+        <a class="btn btn-ghost-primary oa-text-action" data-oa-open="routing" href="{{ detail_url }}&amp;panel=routing">转办{% if detail.current.kind == 'approval' %} / 加签{% endif %} →</a>
         </section>
       </form>{% endif %}

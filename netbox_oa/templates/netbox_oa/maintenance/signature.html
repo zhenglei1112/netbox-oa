@@ -2,18 +2,19 @@
 {% block title %}手机手写签名{% endblock %}
 {% block content %}
 <h1>手机手写签名</h1>
-<p>工单编号：{{ signature.task.order.number }} · {{ signature.task.name }}</p>
+<p>工单编号：{{ signature.document.order.number }} · {% if signature.task %}{{ signature.task.name }}{% else %}申请人签名{% endif %}</p>
 <p>使用手机扫描二维码，书写完整名字后提交。手机仅采集签名，审核仍需在电脑端确认。</p>
 <p>链接有效至 {{ signature.expires_at|date:'Y-m-d H:i:s' }}（15 分钟）。重新生成二维码会使原链接失效。</p>
 <img src="data:image/svg+xml;base64,{{ qr }}" alt="手机签字二维码" width="240" height="240" style="background:white">
-<p><a href="{{ mobile_url }}" rel="noreferrer">在手机打开签字页面</a></p>
+<p><a class="btn btn-ghost-primary" href="{{ mobile_url }}" rel="noreferrer">在手机打开签字页面</a></p>
 <div data-signature-status="{% url 'plugins:netbox_oa:maintenance_signature_status' pk=signature.pk %}">
   <p data-signature-message>{% if signature.confirmed_at %}已确认签名{% elif signature.uploaded_at %}签名已上传，请核对后确认。{% else %}等待手机提交签名……{% endif %}</p>
   <img data-signature-preview src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signature.pk %}" alt="手写签名预览" width="240" height="100" style="object-fit:contain;background:white" {% if not signature.uploaded_at %}hidden{% endif %}>
   <form method="post" action="{% url 'plugins:netbox_oa:maintenance_signature' pk=signature.pk %}">{% csrf_token %}
+    {% if has_saved_signature and not signature.uploaded_at and not signature.cancelled %}<button name="operation" value="reuse" class="btn btn-ghost-primary">使用已保存签名</button>{% endif %}
     <button data-signature-confirm type="submit" class="btn btn-primary" {% if not signature.uploaded_at or signature.cancelled %}disabled{% endif %}>确认使用此签名</button>
-    <button name="operation" value="cancel" class="btn btn-outline-secondary">取消本次签名</button>
-    <a class="btn btn-outline-secondary" href="{{ signature.task.order.get_absolute_url }}">返回工单</a>
+    <button name="operation" value="cancel" class="btn btn-ghost-secondary">取消本次签名</button>
+    <a class="btn btn-ghost-secondary" href="{{ signature.document.order.get_absolute_url }}">返回工单</a>
   </form>
 </div>
 <script src="{% static 'netbox_oa/maintenance-signature.js' %}" defer></script>

@@ -360,27 +360,9 @@ class MaintenanceOrder(WorkflowStateModel):
             ("draft", "未提交"),
             ("submitted", "付款计划已提交"),
             ("requested", "付款申请已提交"),
-            ("awaiting_payment", "待财务支付"),
-            ("paid", "已支付"),
-            ("received", "已确认收款"),
         ),
         verbose_name="付款状态",
     )
-    payment_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, null=True, blank=True, verbose_name="付款金额"
-    )
-    period_start = models.DateField(null=True, blank=True, verbose_name="周期开始")
-    period_end = models.DateField(null=True, blank=True, verbose_name="周期结束")
-    settlement_period_mode = models.CharField(
-        max_length=10,
-        default="day",
-        choices=(("day", "按日"), ("month", "按月")),
-        verbose_name="结算期填写方式",
-    )
-    contract_payment_id = models.PositiveBigIntegerField(
-        null=True, blank=True, verbose_name="外购合同付款 ID"
-    )
-    contract_payment_snapshot = models.JSONField(default=dict, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     followers = models.ManyToManyField(
         settings.AUTH_USER_MODEL, blank=True, related_name="followed_maintenance_orders"
@@ -397,13 +379,6 @@ class MaintenanceOrder(WorkflowStateModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_oa:maintenanceorder", args=[self.pk])
-
-    def clean(self):
-        super().clean()
-        if self.payment_amount is not None and self.payment_amount <= 0:
-            raise ValidationError("付款金额必须大于零。")
-        if self.period_start and self.period_end and self.period_start > self.period_end:
-            raise ValidationError("周期结束不能早于周期开始。")
 
     @fsm_log_by
     @fsm_log_description
@@ -517,16 +492,26 @@ class MaintenanceTask(WorkflowStateModel):
         pass
 
 
+class MaintenanceSavedSignature(models.Model):
+    _netbox_private = True
+    signer = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    image = models.BinaryField(editable=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class MaintenanceSignature(models.Model):
     _netbox_private = True
     key = models.UUIDField(default=uuid4, unique=True, editable=False)
-    task = models.ForeignKey(MaintenanceTask, on_delete=models.PROTECT, related_name="signatures")
+    task = models.ForeignKey(
+        MaintenanceTask, on_delete=models.PROTECT, related_name="signatures", null=True, blank=True
+    )
     document = models.ForeignKey("MaintenanceDocument", on_delete=models.PROTECT)
     signer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     expires_at = models.DateTimeField()
     image = models.BinaryField(default=bytes, blank=True, editable=False)
     uploaded_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
     cancelled = models.BooleanField(default=False)
 
 
@@ -543,6 +528,12 @@ class MaintenanceDocument(ChangeLoggedModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="documents")
     material = models.CharField(max_length=20, choices=MATERIALS)
     version = models.PositiveIntegerField()
+    item_number = models.PositiveIntegerField(default=0, editable=False)
+    removed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    replaces_document = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="replacement_documents", editable=False,
+    )
     file = models.FileField(
         storage=MaintenanceDocumentStorage(), upload_to="maintenance/%Y/%m/", blank=True
     )
@@ -574,6 +565,26 @@ class MaintenanceDocument(ChangeLoggedModel):
 
     def get_absolute_url(self):
         return reverse("plugins:netbox_oa:maintenance_download", args=[self.pk])
+
+    @property
+    def display_name(self):
+        if self.kind == "form":
+            return self.original_name
+        return f"{self.order.number}_{self.short_name}"
+
+    @property
+    def short_name(self):
+        if self.kind == "form":
+            return self.original_name
+        from pathlib import Path
+
+        label = dict(MATERIALS)[self.material]
+        state = "用印后" if self.is_sealed else "审批件" if self.kind == "scan" else "附件"
+        number = f"_{self.item_number:02d}" if self.item_number else ""
+        return (
+            f"{label}{number}_{state}_v{self.version}"
+            f"{Path(self.original_name).suffix.lower()}"
+        )
 
     class Meta:
         ordering = ("material", "-version")

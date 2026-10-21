@@ -1,0 +1,33 @@
+{% extends upload_base %}
+{% load static %}
+{% block title %}上传{{ material.name }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload.css' %}">
+<script src="{% static 'netbox_oa/maintenance-upload.js' %}" defer></script>
+<section class="card oa-upload-page" data-upload-heading="{{ order.number }} · {{ material.name }}" aria-label="{{ material.name }}上传">
+  {% if request.GET.embed != '1' %}<h1>{{ order.number }} · {{ material.name }}</h1>{% endif %}
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.non_field_errors }}
+    {% if replacement %}<p>上传覆盖：{{ replacement.short_name }}。原文件及历史版本将保留。</p>{% endif %}
+    {% if allow_revision %}
+    <div class="mb-3 oa-upload-mode">{{ form.upload_mode.as_field_group }}</div>
+    <div class="mb-3 oa-upload-replacement" hidden>{{ form.replaces_document_ids.label_tag }}{{ form.replaces_document_ids }}<p>更新会保留材料份号和历史版本；选择文件后，请逐个选择要更新的审批件。</p></div>
+    {% elif not multiple and not replacement %}<p>维护服务工单仅一份，上传新文件将更新该份材料并保留历史版本。</p>{% endif %}
+    {% if scan and not batch and not replacement %}<div class="mb-3 oa-upload-source">{{ form.source_document_ids.as_field_group }}<p>选择文件后，请为每份用印后扫描件选择对应审批件。</p></div>{% endif %}
+    <label class="oa-upload-drop" for="{{ form.file.id_for_label }}">
+      <i class="mdi mdi-inbox-arrow-up-outline" aria-hidden="true"></i>
+      <strong>点击此处或拖拽文件到此处上传</strong>
+      <span>{% if multiple %}支持同时上传多个文件{% else %}每次只能上传一个文件{% endif %}，每个文件最大 20 MB</span>
+      <small>{% if scan %}PDF、PNG、JPEG{% else %}PDF、DOCX、XLSX、PNG、JPEG{% endif %}</small>
+      {{ form.file }}
+    </label>
+    {{ form.file.errors }}
+    {{ form.replaces_document_ids.errors }}
+    <ul class="oa-upload-selected" aria-live="polite" aria-label="已选文件"></ul>
+    <div class="d-flex justify-content-end gap-2 mt-3">
+      <a class="btn btn-ghost-secondary" data-upload-cancel href="{% url 'plugins:netbox_oa:maintenance_review' pk=order.pk %}?material={{ material.key }}">取消</a>
+      <button class="btn btn-primary" type="submit">确定上传</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

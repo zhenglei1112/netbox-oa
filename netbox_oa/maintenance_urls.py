@@ -5,6 +5,31 @@ from . import maintenance_views as views
 
 urlpatterns = [
     path(
+        "maintenance/materials/<int:pk>/remove/",
+        views.MaintenanceMaterialRemoveView.as_view(),
+        name="maintenance_material_remove",
+    ),
+    path(
+        "maintenance/orders/<int:pk>/materials/<str:material>/upload/",
+        views.MaintenanceMaterialUploadView.as_view(),
+        name="maintenance_material_upload",
+    ),
+    path(
+        "maintenance/materials/<int:pk>/verify/",
+        views.MaintenanceVerificationView.as_view(),
+        name="maintenance_verify",
+    ),
+    path(
+        "maintenance/orders/<int:pk>/review/",
+        views.MaintenanceReviewView.as_view(),
+        name="maintenance_review",
+    ),
+    path(
+        "maintenance/materials/<int:pk>/preview/",
+        views.MaintenancePreviewView.as_view(),
+        name="maintenance_preview",
+    ),
+    path(
         "maintenance/tasks/<int:pk>/signature/",
         signatures.SignatureCreateView.as_view(),
         name="maintenance_signature_create",

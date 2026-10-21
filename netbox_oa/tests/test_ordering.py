@@ -1,13 +1,11 @@
 from datetime import date
-from importlib import import_module
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -56,27 +54,11 @@ class OrderingTests(TestCase):
         self.assertEqual(document.form_data["requirements"], order.requirements)
         self.assertEqual(document.form_data["supplier"], order.supplier)
         self.assertEqual(document.form_data["service_region"], order.service_region)
+        test_maintenance.sign_draft(order, self.actor)
         services.start_order(pk=order.pk, actor=self.actor)
         task = order.tasks.get(status="pending")
-        test_maintenance.sign_initial_task(task)
-        services.complete_task(pk=task.pk, actor=self.actor)
-        self.assertEqual(order.tasks.get(status="pending").name, "工单初审")
+        self.assertEqual(task.name, "工单初审")
         self.assertEqual(order.documents.count(), 1)
-
-    def test_backfill_repairs_missing_legacy_forms_without_overwriting_revisions(self):
-        self.start()
-        self.assertFalse(self.order.documents.exists())
-        migration = import_module("netbox_oa.migrations.0009_backfill_order_forms")
-        migration.backfill_order_forms(apps, SimpleNamespace(connection=connection))
-        document = self.order.documents.get(material="order", kind="form")
-        self.assertEqual(document.form_data["requirements"], self.order.requirements)
-        self.assertEqual(document.form_data["number"], self.order.number)
-        self.assertEqual(document.form_data["signature"], "")
-        migration.backfill_order_forms(apps, SimpleNamespace(connection=connection))
-        self.assertEqual(self.order.documents.count(), 1)
-        test_maintenance.sign_initial_task(self.current())
-        services.complete_task(pk=self.current().pk, actor=self.actor)
-        self.assertEqual(self.current().name, "工单初审")
 
     def test_only_enabled_policy_is_selected_by_default(self):
         form = MaintenanceOrderForm(actor=self.actor)
@@ -171,16 +153,23 @@ class OrderingTests(TestCase):
         )
         return groups
 
-    def test_exact_three_nodes_and_configured_group_approvals_with_signed_print(self):
+    def test_current_ordering_nodes_and_configured_group_approvals_with_signed_print(self):
         groups = self.configure_ordering()
         self.start()
         self.assertEqual(
             [step["name"] for step in self.order.steps_snapshot if step["stage"] == "ordering"],
-            ["发起工单", "工单初审", "工单部门审核"],
+            [
+                "工单修正",
+                "工单初审",
+                "工单部门审核",
+                "服务工单",
+                "服务工单用印部门审核",
+                "服务工单用印公司审批",
+                "服务工单用印",
+            ],
         )
-        self.assertEqual(self.current().assigned_user_id, self.actor.pk)
-        document = self.upload("order")
-        self.complete()
+        self.assertIsNone(self.current().assigned_user_id)
+        document = self.order.documents.get(material="order", kind="form")
         for role, name in (("reviewer", "reviewer_a"), ("department", "reviewer_b")):
             task = self.current()
             reviewer = get_user_model().objects.create_user(username=name)
@@ -200,15 +189,15 @@ class OrderingTests(TestCase):
                 },
             )
         self.order.refresh_from_db()
-        self.assertEqual(self.order.stage, "report")
+        self.assertEqual(self.current().name, "服务工单")
         self.client.force_login(self.actor)
         printed = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
         self.assertEqual(printed.context["signatures"]["order_review"]["name"], "reviewer_a")
         self.assertEqual(printed.context["signatures"]["order_final"]["name"], "reviewer_b")
-        self.assertContains(printed, "签字：reviewer_a")
-        self.assertContains(printed, "签字：reviewer_b")
+        self.assertContains(printed, "<td>reviewer_a</td>")
+        self.assertContains(printed, "<td>reviewer_b</td>")
 
     def test_members_outside_configured_group_cannot_approve(self):
         self.configure_ordering()
@@ -245,6 +234,7 @@ class OrderingTests(TestCase):
         new_order = services.create_order(
             actor=self.actor, policy=self.policy, **self.create_data()
         )
+        test_maintenance.sign_draft(new_order, self.actor)
         new_order = services.start_order(pk=new_order.pk, actor=self.actor)
         self.assertEqual(new_order.steps_snapshot[1]["group_id"], replacement.pk)
         self.assertEqual(new_order.steps_snapshot[2]["group_id"], replacement.pk)
@@ -275,10 +265,10 @@ class OrderingTests(TestCase):
             reverse("plugins:netbox_oa:maintenance_flow_definition"), {"policy": self.policy.pk}
         )
         nodes = preview.context["stages"][0]["nodes"]
+        self.assertEqual(nodes[0]["group"].pk, replacement.pk)
         self.assertEqual(nodes[1]["group"].pk, replacement.pk)
-        self.assertEqual(nodes[2]["group"].pk, replacement.pk)
-        self.assertEqual(nodes[1]["role_label"], "初审人")
-        self.assertEqual(nodes[2]["role_label"], "部门负责人")
+        self.assertEqual(nodes[0]["role_label"], "初审人")
+        self.assertEqual(nodes[1]["role_label"], "部门负责人")
 
     def test_contract_keeps_number_and_supplier_but_allows_manual_region(self):
         order = services.create_order(
@@ -310,7 +300,7 @@ class OrderingTests(TestCase):
         url = reverse("plugins:netbox_oa:maintenanceorder_add")
         page = self.client.get(url)
         self.assertTemplateUsed(page, "generic/object_edit.html")
-        self.assertTemplateUsed(page, "htmx/form.html")
+        self.assertTemplateUsed(page, "form_helpers/render_field.html")
         self.assertContains(page, "oa-contract-options")
         self.assertContains(page, "maintenance-contract.js")
         response = self.client.post(url, form.data)
@@ -337,8 +327,9 @@ class OrderingTests(TestCase):
         self.assertEqual(
             order.documents.get(kind="form").form_data["service_region"], order.service_region
         )
+        test_maintenance.sign_draft(order, self.actor)
         services.start_order(pk=order.pk, actor=self.actor)
-        self.assertEqual(order.tasks.get(status="pending").name, "发起工单")
+        self.assertEqual(order.tasks.get(status="pending").name, "工单初审")
 
     def test_framework_contract_without_manual_region_has_field_error(self):
         self.contract.custom_field_data = {}

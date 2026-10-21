@@ -1,0 +1,16 @@
+<ol class="oa-record-timeline" aria-label="按时间顺序排列的详细办理节点">
+  {% for item in activity_records %}
+  <li class="oa-record-node{% if item.event.action == 'return' or item.event.action == 'terminate' %} oa-record-warning{% endif %}" data-event-id="{{ item.event.pk }}">
+    <div class="oa-record-step">
+      <span class="oa-record-circle">{{ forloop.counter }}</span>
+      <div class="oa-record-title"><strong>{% if item.event.task %}{{ item.event.task.name }}{% else %}{{ item.short_label }}{% endif %}</strong>{% if item.event.task and item.short_label != item.event.task.name %}<span class="oa-record-result">{{ item.short_label }}</span>{% endif %}</div>
+    </div>
+    <div class="oa-record-detail">
+      <div class="oa-record-person"><span>{{ item.actor_name }}</span><time datetime="{{ item.event.created|date:'c' }}" title="{{ item.event.created|date:'Y-m-d H:i' }}">{{ item.event.created|date:'m-d H:i' }}</time></div>
+      {% if item.record_comment %}<p>{{ item.record_comment|linebreaksbr }}</p>{% endif %}
+      {% if item.record_context %}<p class="oa-record-description">{{ item.record_context }}</p>{% endif %}
+      {% if item.event.details.external_reference %}<p class="oa-record-reference">外部单号：{{ item.event.details.external_reference }}</p>{% endif %}
+    </div>
+  </li>
+  {% empty %}<li class="oa-audit-empty">暂无可查看记录</li>{% endfor %}
+</ol>

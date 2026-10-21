@@ -6,12 +6,24 @@
     if (area) {
       const fitCanvas = () => {
         const rect = area.getBoundingClientRect();
-        const width = Math.min(rect.width, rect.height * 16 / 9);
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${width * 9 / 16}px`;
+        if (!rect.width || !rect.height) return;
+        const scale = Math.min(1280 / rect.width, 720 / rect.height);
+        const width = Math.round(rect.width * scale), height = Math.round(rect.height * scale);
+        if (canvas.width !== width || canvas.height !== height) {
+          const previous = document.createElement('canvas');
+          previous.width = canvas.width; previous.height = canvas.height;
+          previous.getContext('2d').drawImage(canvas, 0, 0);
+          canvas.width = width; canvas.height = height;
+          const fit = Math.min(width / previous.width, height / previous.height);
+          ctx.drawImage(previous, (width - previous.width * fit) / 2,
+            (height - previous.height * fit) / 2, previous.width * fit, previous.height * fit);
+        }
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       };
       fitCanvas();
-      // Change only display dimensions; the bitmap and existing ink stay intact.
+      // Preserve the ink and its proportions while filling the available surface.
       new ResizeObserver(fitCanvas).observe(area);
     }
     let pointer = null, ink = false;

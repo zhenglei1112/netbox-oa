@@ -2,13 +2,14 @@
 
 from collections import defaultdict
 from datetime import timedelta
+from textwrap import wrap
 
 from django.contrib.auth import get_user_model
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Min, OuterRef, Q, Subquery
 from django.utils import timezone
 from users.models import Group
 
-from .maintenance_flow import FLOW_NAME, ROLES
+from .maintenance_flow import ROLES
 from .models import MaintenanceEvent, MaintenanceOrder, MaintenanceTask
 
 
@@ -18,19 +19,10 @@ def person_name(person, viewer=None):
     return person.get_full_name().strip() or person.get_username()
 
 
-def event_description(event):
-    if event.action == "start" and event.description in {
-        "发起四阶段维护流程",
-        "发起维护流程",
-    }:
-        return f"发起{FLOW_NAME}"
-    return event.description
-
-
 def event_label(event):
     if event.action == "complete" and event.task and event.task.kind in {"approval", "countersign"}:
         return "同意"
-    return event_description(event)
+    return event.description
 
 
 def activity_meta(event):
@@ -43,6 +35,7 @@ def activity_meta(event):
         "transfer": ("转办", "⇄"),
         "countersign": ("加签", "+"),
         "upload": ("上传材料", "↑"),
+        "remove_material": ("删除材料", "×"),
         "form": ("保存表单", "▤"),
         "terminate": ("终止工单", "×"),
         "withdraw": ("撤销申请", "×"),
@@ -79,6 +72,13 @@ class InboxPresentation:
             self.tasks[task.order_id].append(task)
         self.events = MaintenanceEvent.objects.restrict(user, "view").filter(
             Q(task__isnull=True) | Q(task__in=visible_tasks)
+        )
+        self.started_at = dict(
+            self.events.filter(order_id__in=ids, action="start")
+            .order_by()
+            .values("order_id")
+            .annotate(started_at=Min("created"))
+            .values_list("order_id", "started_at")
         )
         latest = self.events.filter(order_id=OuterRef("pk")).order_by("-created", "-pk")
         event_ids = (
@@ -151,6 +151,8 @@ class InboxPresentation:
         nodes = []
         for index, step in enumerate(order.steps_snapshot):
             task = latest.get(index)
+            if step.get("return_only") and not task and index != order.current_position:
+                continue
             future = order.status == "active" and index > order.current_position
             state = task.status if task and not future else "not_started"
             if task and not future:
@@ -228,6 +230,9 @@ class InboxPresentation:
             "assigned_to_me": assigned,
             "status_label": status,
             "requester_name": person_name(order.requester, self.user),
+            "initiated_at": (
+                order.created if order.status == "draft" else self.started_at.get(order.pk)
+            ),
             "waiting_for": waiting_for,
             "latest_activity": activity,
             "activity_at": event.created if event else order.created,
@@ -241,7 +246,9 @@ class InboxPresentation:
             if waited >= 60
             else f"{waited} 分钟",
             "deadline_state": deadline_state,
-            "required_materials": {key for key, _ in step.get("required", [])},
+            "required_materials": {"order"}
+            if order.status == "draft"
+            else {key for key, _ in step.get("required", [])},
             "can_return": bool(step.get("return_to"))
             and current.kind in {"approval", "external", "countersign"}
             if current
@@ -262,7 +269,7 @@ class InboxPresentation:
                     "event": event,
                     "actor_name": person_name(event.actor, self.user),
                     "action_label": event_label(event),
-                    "description": event_description(event),
+                    "description": event.description,
                     "short_label": label,
                     "symbol": symbol,
                 }
@@ -280,10 +287,28 @@ class InboxPresentation:
             "terminate",
             "withdraw",
         }
-        for item in events:
-            event = item["event"]
-            if event.action not in actions:
-                continue
+        approval_records = (
+            self.events.filter(order=order, action__in=actions)
+            .select_related("actor", "task")
+            .order_by("created", "pk")
+        )
+        for event in approval_records:
+            label, symbol = activity_meta(event)
+            comment = event.details.get("comment", "")
+            record_comment = comment if comment.strip() != label else ""
+            record_context = event.description if event.action in {
+                "return", "transfer", "countersign"
+            } and event.description not in {label, comment} else ""
+            item = {
+                "event": event,
+                "actor_name": person_name(event.actor, self.user),
+                "action_label": event_label(event),
+                "description": event.description,
+                "short_label": label,
+                "symbol": symbol,
+                "record_comment": record_comment,
+                "record_context": record_context,
+            }
             if event.task_id:
                 if event.task.status == "pending" and event.task.position == order.current_position:
                     current_activity = item
@@ -308,5 +333,76 @@ class InboxPresentation:
             "current_activity": current_activity,
             "current_activity_comment": "\n".join(current_comments),
             "recent_events": list(reversed(approval_events[-6:])),
+            "sidebar_events": list(reversed(approval_events)),
             "has_earlier_events": len(records) > limit,
         }
+
+    def approval_diagram(self, order):
+        from .maintenance_diagram import build_diagram
+        from .maintenance_flow import STAGES
+
+        if not order.steps_snapshot:
+            return None
+        stages = {}
+        normal_position = 0
+        for position, step in enumerate(order.steps_snapshot):
+            if not step.get("return_only"):
+                normal_position += 1
+            attempts = []
+            tasks = [task for task in self.tasks[order.pk] if task.position == position]
+            for task in tasks:
+                if task.decided_by_id:
+                    actor = task.decided_by.get_full_name() or task.decided_by.get_username()
+                elif task.assigned_user_id:
+                    actor = task.assigned_user.get_full_name() or task.assigned_user.get_username()
+                else:
+                    actor = "待办理"
+                attempts.append(
+                    {
+                        "actor": actor,
+                        "time": task.completed_at,
+                        "status": task.get_status_display(),
+                        "name": task.name,
+                        "comment": task.comment,
+                    }
+                )
+            state = tasks[-1].status if tasks else "not_started"
+            if order.status == "active" and position == order.current_position:
+                state = "current"
+            node = {
+                **step,
+                "position": "修正" if step.get("return_only") else normal_position,
+                "return_label": bool(step.get("return_to")),
+                "attempts": attempts,
+                "state": state,
+                "state_label": {
+                    "completed": "已完成",
+                    "current": "当前环节",
+                    "returned": "已退回",
+                    "cancelled": "已取消",
+                    "pending": "待处理",
+                }.get(state, "未办理"),
+            }
+            stages.setdefault(
+                step["stage"],
+                {
+                    "name": dict(STAGES).get(step["stage"], step["stage"]),
+                    "nodes": [],
+                },
+            )["nodes"].append(node)
+        # Match the definition diagram: correction is a side path below the main lane.
+        for stage in stages.values():
+            stage["nodes"].sort(key=lambda node: bool(node.get("return_only")))
+        for stage in stages.values():
+            for node in stage["nodes"]:
+                title_extra = (len(wrap(node["name"], 17)) - 1) * 20
+                node["height"] = 84 + title_extra + max(0, len(node["attempts"]) - 1) * 36
+        diagram = build_diagram(list(stages.values()), node_gap=24)
+        diagram["node_height"] = max(node["height"] for node in diagram["nodes"])
+        for node in diagram["nodes"]:
+            content_y = node["label_lines"][-1]["y"] + 24
+            for index, attempt in enumerate(node["attempts"]):
+                attempt["actor_y"] = content_y + index * 36
+                attempt["time_y"] = attempt["actor_y"] + 17
+            node["empty_y"] = content_y
+        return diagram
