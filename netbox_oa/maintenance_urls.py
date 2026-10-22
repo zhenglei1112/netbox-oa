@@ -5,6 +5,16 @@ from . import maintenance_views as views
 
 urlpatterns = [
     path(
+        "maintenance/v2/",
+        views.MaintenanceWorkbenchV2View.as_view(),
+        name="maintenance_workbench_v2",
+    ),
+    path(
+        "maintenance/materials/<int:pk>/print-event/",
+        views.MaintenancePrintEventView.as_view(),
+        name="maintenance_print_event",
+    ),
+    path(
         "maintenance/materials/<int:pk>/remove/",
         views.MaintenanceMaterialRemoveView.as_view(),
         name="maintenance_material_remove",

@@ -24,6 +24,84 @@ class MaterialItemTests(TestCase):
     reach = test_maintenance.MaintenanceTests.reach
     upload = test_maintenance.MaintenanceTests.upload
 
+    def test_review_skips_workbench_history_and_reduces_queries(self):
+        from unittest.mock import patch
+
+        from django.test.utils import CaptureQueriesContext
+
+        from netbox_oa.maintenance_views import presentation
+
+        self.reach("payment_eip")
+        self.order.refresh_from_db()
+        with CaptureQueriesContext(connection) as full:
+            presentation(self.order, self.actor)
+        with CaptureQueriesContext(connection) as compact:
+            detail = presentation(self.order, self.actor, materials_only=True)
+        self.assertLess(len(compact), len(full))
+        self.assertEqual(len(detail["materials"]), 7)
+        self.client.force_login(self.actor)
+        workbench = self.client.get(self.order.get_absolute_url())
+        self.assertContains(workbench, 'aria-label="材料目录"')
+        self.assertContains(workbench, 'target="review-order-frame"')
+        self.assertContains(workbench, 'name="review-order-frame"')
+        with patch("netbox_oa.maintenance_views.InboxPresentation", side_effect=AssertionError):
+            page = self.client.get(reverse(
+                "plugins:netbox_oa:maintenance_review", args=[self.order.pk]
+            ))
+        self.assertEqual(page.status_code, 200)
+
+    def test_payment_evidence_is_direct_scan_without_stamping_approval(self):
+        self.reach("payment_eip")
+        self.client.force_login(self.actor)
+        url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
+        for material in ("notice", "invoice", "contract", "verification"):
+            with self.subTest(material=material):
+                document = self.upload(material)
+                self.assertFalse(document.is_sealed)
+                self.assertIsNone(document.source_document_id)
+                self.assertIn("_扫描件_v", document.display_name)
+                self.assertEqual(Path(document.file.name).name, document.display_name)
+                page = self.client.get(url, {"material": material})
+                self.assertTrue(page.context["selected_group"]["can_upload"])
+                entries = page.context["selected_group"]["index_rows"][0]["files"]
+                self.assertEqual([entry["label"] for entry in entries], ["扫描件"])
+                self.assertEqual(entries[0]["icon"], "mdi-file-image-outline")
+                self.assertContains(page, 'data-file-type="scan"')
+                self.assertIn("扫描件", next(
+                    item["label"] for item in page.context["review_items"]
+                    if item["document"].pk == document.pk
+                ))
+        self.complete()
+        self.assertFalse(self.order.tasks.filter(status="pending").exists())
+
+    def test_existing_active_payment_snapshot_gains_verification_once(self):
+        from importlib import import_module
+        from types import SimpleNamespace
+
+        from django.apps import apps
+
+        self.reach("payment_eip")
+        self.order.refresh_from_db()
+        step = self.order.steps_snapshot[self.current().position]
+        step["required"] = [pair for pair in step["required"] if pair[0] != "verification"]
+        self.order.save()
+        migrate = import_module(
+            "netbox_oa.migrations.0024_payment_verification"
+        ).add_payment_verification
+        schema_editor = SimpleNamespace(connection=connection)
+        migrate(apps, schema_editor)
+        migrate(apps, schema_editor)
+        self.order.refresh_from_db()
+        required = self.order.steps_snapshot[self.current().position]["required"]
+        self.assertEqual(required.count(["verification", "electronic"]), 1)
+        self.order.steps_snapshot[self.current().position]["required"] = []
+        MaintenanceOrder.objects.filter(pk=self.order.pk).update(
+            status="completed", steps_snapshot=self.order.steps_snapshot,
+        )
+        migrate(apps, schema_editor)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.steps_snapshot[self.current().position]["required"], [])
+
     def test_order_has_one_logical_scan_and_preserves_prior_revisions(self):
         self.reach("order_scan_fill")
         first = self.upload("order", "scan")
@@ -151,6 +229,22 @@ class MaterialItemTests(TestCase):
         self.assertEqual([entry["label"] for entry in rows[1]["files"]], ["用印后", "审批件"])
         self.assertContains(response, f'aria-label="服务报告 第 1 份 审批件 v{first.version}"')
         self.assertEqual(response.context["selected"], first)
+        report_items = [item for item in response.context["review_items"]
+                        if item["group"]["key"] == "report"]
+        self.assertEqual([item["document"] for item in report_items], [first, sealed, other])
+        self.assertEqual([item["type"] for item in report_items], ["pdf", "pdf", "pdf"])
+        self.assertEqual([item["document"] for item in report_items if item["preferred"]],
+                         [first, sealed])
+        self.assertEqual([item["item_id"] for item in report_items],
+                         [first.pk, sealed.pk, sealed.pk])
+        for document in [first, sealed, other]:
+            self.assertContains(response, f'id="review-document-{document.pk}"')
+        self.assertContains(response, 'aria-label="材料预览"')
+        from netbox_oa.tests.test_inbox import PanelMarkup
+        markup = PanelMarkup(response.content.decode())
+        visible_documents = [attrs for tag, attrs in markup.elements
+                             if tag == "article" and "hidden" not in attrs]
+        self.assertEqual([attrs["data-document"] for attrs in visible_documents], [str(first.pk)])
         order_group = next(group for group in response.context["groups"] if group["key"] == "order")
         self.assertEqual(len(order_group["index_rows"]), 1)
         self.assertEqual([entry["label"] for entry in order_group["index_rows"][0]["files"]],

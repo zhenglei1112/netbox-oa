@@ -174,17 +174,24 @@ class MaintenanceTests(TestCase):
                 pk=self.current().pk, actor=self.actor, external_reference="EIP-001"
             )
         self.assertEqual(caught.exception.messages, [
-            "请上传以下材料：付款通知书、电子发票、合同复印件。"
+            "请上传以下材料：付款通知书、电子发票、合同复印件、发票验真结果。"
         ])
         self.upload("notice")
         with self.assertRaises(ValidationError) as caught:
             services.complete_task(
                 pk=self.current().pk, actor=self.actor, external_reference="EIP-001"
             )
-        self.assertEqual(caught.exception.messages, ["请上传以下材料：电子发票、合同复印件。"])
+        self.assertEqual(caught.exception.messages, [
+            "请上传以下材料：电子发票、合同复印件、发票验真结果。"
+        ])
         self.assertNotIn("材料状态至少", str(caught.exception))
         self.upload("invoice")
         self.upload("contract")
+        with self.assertRaisesMessage(ValidationError, "发票验真结果"):
+            services.complete_task(
+                pk=self.current().pk, actor=self.actor, external_reference="EIP-001"
+            )
+        self.upload("verification")
         self.assertEqual(services.complete_task(
             pk=self.current().pk, actor=self.actor, external_reference="EIP-001"
         ).status, "completed")
@@ -346,12 +353,12 @@ class MaintenanceTests(TestCase):
         )
         with self.assertRaisesMessage(ValidationError, "付款通知书"):
             services.complete_task(pk=self.current().pk, actor=self.actor)
-        for material in ("notice", "invoice", "contract"):
+        for material in ("notice", "invoice", "contract", "verification"):
             self.upload(material)
         self.client.force_login(self.actor)
         page = self.client.get(self.order.get_absolute_url())
         self.assertContains(page, 'aria-label="上传"')
-        for material in ("notice", "invoice", "contract"):
+        for material in ("notice", "invoice", "contract", "verification"):
             self.assertContains(page, f"panel=material-{material}&amp;pane=upload")
         with self.assertRaisesMessage(ValidationError, "外部流程节点必须登记"):
             services.complete_task(pk=self.current().pk, actor=self.actor)

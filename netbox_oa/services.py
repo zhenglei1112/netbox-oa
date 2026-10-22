@@ -29,7 +29,16 @@ def _allowed(model, actor, action, pk):
 
 def _save(obj):
     obj.full_clean()
-    obj.save()
+    message = getattr(obj, "_changelog_message", None)
+    if not message:
+        verb = "新增" if obj._state.adding else "保存"
+        obj._changelog_message = f"{verb}{obj._meta.verbose_name}"
+    try:
+        obj.save()
+    finally:
+        obj._changelog_message = message
+    # A service may save the same instance more than once within one request.
+    obj.snapshot()
 
 
 def _snapshot(obj):
@@ -37,6 +46,12 @@ def _snapshot(obj):
 
 
 def _transition(obj, action, actor, comment):
+    labels = {
+        "submit": "提交审批", "approve": "批准", "reject": "驳回", "cancel": "取消",
+        "start": "发起审批", "finish": "完成工单", "complete": "完成节点",
+        "send_back": "退回补正", "terminate": "终止工单", "withdraw": "撤销草稿",
+    }
+    obj._changelog_message = f"{labels.get(action, action)}：{comment}".rstrip("：")[:200]
     try:
         getattr(obj, action)(by=actor, description=comment)
     except TransitionNotAllowed as exc:

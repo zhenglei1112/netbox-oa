@@ -6,6 +6,7 @@ const source = readFileSync('netbox_oa/static/netbox_oa/maintenance-inbox.js', '
 
 function setup() {
   const handlers = {}, timers = new Map(), replacements = [], requests = [], historyCalls = [];
+  const requestOptions = [];
   let submitted = 0, timerId = 0;
   const node = () => ({scrollTop: 0, classList: {add() {}, toggle() {}},
     querySelector: () => null, querySelectorAll: () => [],
@@ -35,10 +36,13 @@ function setup() {
     clearTimeout(id) {timers.delete(id);},
     URL, URLSearchParams, AbortController,
     FormData: class { *[Symbol.iterator]() {yield ['tab', 'todo']; yield ['q', '2026'];} },
-    fetch: async url => {requests.push(url); return {ok: true, text: async () => 'page'};},
+    fetch: async (url, options) => {
+      requests.push(url); requestOptions.push(options);
+      return {ok: true, text: async () => 'page'};
+    },
     DOMParser: class {parseFromString() {return {querySelector: () => next};}},
   });
-  return {input, form, timers, sections, replacements, requests, historyCalls,
+  return {input, form, timers, sections, replacements, requests, requestOptions, historyCalls,
     submitted: () => submitted,
     async dispatch(name, extra = {}) {
       for (const fn of handlers[name] || []) await fn({target: input, ...extra});
@@ -59,6 +63,19 @@ test('typing is debounced and clearing uses the same automatic search', async ()
   assert.equal(page.submitted(), 2);
 });
 
+test('delegated events ignore non-element targets forwarded by browser scripts', async () => {
+  const page = setup();
+  for (const target of [null, {}, {nodeType: 9}, {nodeType: 3}]) {
+    for (const name of ['keydown', 'click', 'close', 'change', 'input',
+      'compositionstart', 'compositionend', 'submit']) {
+      await page.dispatch(name, {target, key: 'ArrowRight',
+        preventDefault() {assert.fail('Unrelated events must not be cancelled');}});
+    }
+  }
+  assert.equal(page.timers.size, 0);
+  assert.equal(page.requests.length, 0);
+});
+
 test('Chinese composition does not submit until composition ends', async () => {
   const page = setup();
   await page.dispatch('input');
@@ -74,6 +91,7 @@ test('search only refreshes the list and retains selection, scope and handling c
   const page = setup();
   await page.dispatch('submit', {target: page.form, preventDefault() {}});
   assert.equal(page.requests.length, 1);
+  assert.equal(page.requestOptions[0].headers['X-OA-Navigation'], 'search');
   const url = new URL(page.requests[0]);
   assert.equal(url.searchParams.get('tab'), 'todo');
   assert.equal(url.searchParams.get('q'), '2026');

@@ -1,5 +1,5 @@
         <dialog class="oa-panel" id="information" aria-labelledby="oa-information-title" {% if panel_id == 'information' %}open{% endif %}>
-  <header class="oa-panel-header"><div><span class="oa-eyebrow">工单资料</span><h2 id="oa-information-title">完整工单信息</h2></div><a data-oa-close href="{{ detail_url }}" class="btn btn-ghost-secondary oa-close" aria-label="关闭工单信息">×</a></header>
+  <header class="oa-panel-header"><div><h2 id="oa-information-title">完整工单信息</h2></div><a data-oa-close href="{{ detail_url }}" class="btn btn-ghost-secondary oa-close" aria-label="关闭工单信息">×</a></header>
   <div class="oa-panel-body oa-basic"><h3>工单基本信息 {% if detail.can_change and detail.order.status == 'draft' or detail.can_act and detail.current.name == '工单修正' %}<a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}">修改</a>{% endif %}</h3><dl>
           <dt>线路主管</dt><dd>{{ detail.order.owner }}</dd><dt>发起人</dt><dd>{{ detail.order.requester }}</dd>
           <dt>服务省市</dt><dd>{{ detail.order.service_region }}</dd><dt>服务位置</dt><dd>{{ detail.order.service_location }}</dd>

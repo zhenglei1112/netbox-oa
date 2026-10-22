@@ -7,9 +7,9 @@
   <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
   <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261018-3">
-  {% if not request.GET.embed %}<script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261018-2" defer></script>{% endif %}
+  <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261021-1" defer></script>
 </head>
-<body>
+<body data-audit-url="{% url 'plugins:netbox_oa:maintenance_print_event' pk=document.pk %}" data-csrf-token="{{ csrf_token }}">
 {% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ document.order.get_absolute_url }}">返回工单 / 上传扫描件</a><span>表单 v{{ document.version }} · 签字盖章后上传对应扫描件</span></nav>{% endif %}
 <main class="print-sheet {% if document.material == 'report' %}report-sheet{% else %}order-sheet{% endif %}">
   {% if document.material == 'order' %}

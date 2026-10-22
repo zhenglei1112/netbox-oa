@@ -9,8 +9,8 @@
 <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
 <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-review.css' %}?v=20261021-6">
-  <script src="{% static 'netbox_oa/maintenance-review.js' %}?v=20261021-2" defer></script>
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-review.css' %}?v=20261021-10">
+  <script src="{% static 'netbox_oa/maintenance-review.js' %}?v=20261022-2" defer></script>
   <script src="{% static 'netbox_oa/maintenance-review-maintenance.js' %}" defer></script>
 </head>
 <body>
@@ -20,6 +20,7 @@
         <span><i class="mdi mdi-stamper" aria-hidden="true"></i> 用印后</span>
         <span><i class="mdi mdi-file-check-outline" aria-hidden="true"></i> 审批件</span>
         <span><i class="mdi mdi-file-document-outline" aria-hidden="true"></i> 电子版</span>
+        <span><i class="mdi mdi-file-image-outline" aria-hidden="true"></i> 扫描件</span>
       </div>
       {% for group in groups %}
       <section class="material-group">
@@ -32,7 +33,7 @@
           <a class="material-item-label material-row-link" href="?{% if request.GET.embed %}embed=1&amp;{% endif %}material={{ group.key }}&amp;document={{ row.default_document.pk }}" aria-label="查看{{ group.name }} {{ row.label }}">{{ row.label }}</a>
           <div class="material-file-links">
             {% for entry in row.files %}{% with document=entry.document %}
-            <a class="btn {% if document.pk == selected.pk %}btn-primary{% else %}btn-ghost-primary{% endif %} material-file {% if document.pk == selected.pk %}selected{% endif %}" data-file-type="{% if document.is_sealed %}sealed{% elif document.kind == 'scan' %}approval{% else %}electronic{% endif %}" href="?{% if request.GET.embed %}embed=1&amp;{% endif %}material={{ group.key }}&amp;document={{ document.pk }}" {% if document.pk == selected.pk %}aria-current="page"{% endif %} aria-label="{{ group.name }} {{ row.label }} {{ entry.label }} v{{ document.version }}" title="{{ entry.label }} · {% if document.kind == 'form' %}填写表单{% else %}{{ document.short_name }}{% endif %} · v{{ document.version }}{% if document.is_sealed %} · 对应审批件 v{{ document.source_document.version }}{% endif %}{% if document.replaces_document_id %} · 更新自 v{{ document.replaces_document.version }}{% endif %} · 原文件：{{ document.original_name }}">
+            <a class="btn {% if document.pk == selected.pk %}btn-primary{% else %}btn-ghost-primary{% endif %} material-file {% if document.pk == selected.pk %}selected{% endif %}" data-file-type="{% if document.is_direct_scan %}scan{% elif document.is_sealed %}sealed{% elif document.kind == 'scan' %}approval{% else %}electronic{% endif %}" href="?{% if request.GET.embed %}embed=1&amp;{% endif %}material={{ group.key }}&amp;document={{ document.pk }}" {% if document.pk == selected.pk %}aria-current="page"{% endif %} aria-label="{{ group.name }} {{ row.label }} {{ entry.label }} v{{ document.version }}" title="{{ entry.label }} · {% if document.kind == 'form' %}填写表单{% else %}{{ document.short_name }}{% endif %} · v{{ document.version }}{% if document.is_sealed %} · 对应审批件 v{{ document.source_document.version }}{% endif %}{% if document.replaces_document_id %} · 更新自 v{{ document.replaces_document.version }}{% endif %} · 原文件：{{ document.original_name }}">
               <i class="mdi {{ entry.icon }}" aria-hidden="true"></i>
             </a>
             {% endwith %}{% endfor %}
@@ -54,20 +55,14 @@
   </aside>
   <main>
     {% if not request.GET.embed %}<a class="btn btn-ghost-secondary review-return" href="{{ order.get_absolute_url }}">返回审批</a>{% endif %}
-    <section class="document-view" aria-label="材料展示">
-      {% if selected and previewable %}
-        {% if selected.kind == 'form' %}
-        <iframe title="{{ selected_group.name }}正文" src="{% url 'plugins:netbox_oa:maintenance_print' pk=selected.pk %}?embed=1"></iframe>
-        {% elif is_image %}
-        <div class="image-sheet"><img src="{% url 'plugins:netbox_oa:maintenance_preview' pk=selected.pk %}" alt="{{ selected.original_name }}"></div>
-        {% else %}
-        <iframe title="{{ selected.original_name }}" src="{% url 'plugins:netbox_oa:maintenance_preview' pk=selected.pk %}"></iframe>
-        {% endif %}
-      {% elif selected %}
-        <div class="empty-state"><p>此文件格式暂不支持在线展示。</p><a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=selected.pk %}">下载文件</a></div>
-      {% else %}
-        <div class="empty-state"><p>此材料暂无可查看文件。</p><p>可通过左侧索引切换其他材料。</p></div>
-      {% endif %}
+    <section class="document-view" aria-label="材料预览" tabindex="0" data-selected="{{ selected.pk }}" data-material="{{ selected_group.key }}" data-order-number="{{ order.number }}">
+      {% for item in review_items %}
+      <article class="review-document" id="review-document-{{ item.document.pk }}" data-document="{{ item.document.pk }}" {% if item.document.pk != selected.pk %}hidden{% endif %} data-material="{{ item.group.key }}" data-type="{{ item.type }}" data-title="{{ item.label }}" data-source="{% if item.type == 'form' %}{% url 'plugins:netbox_oa:maintenance_print' pk=item.document.pk %}?embed=1{% else %}{% url 'plugins:netbox_oa:maintenance_preview' pk=item.document.pk %}{% endif %}" aria-label="{{ item.label }}">
+        <header class="review-document-heading"><h2>{{ item.label }}</h2><a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=item.document.pk %}" target="_blank" rel="noopener" aria-label="打开或下载{{ item.label }}"><i class="mdi mdi-download" aria-hidden="true"></i> 下载 / 打印</a></header>
+        <div class="review-document-content" aria-busy="true"><p class="review-loading" role="status">等待加载材料…</p></div>
+        <noscript><p>请启用 JavaScript 阅读材料，或通过下载 / 打印入口查阅原文件。</p></noscript>
+      </article>
+      {% empty %}<div class="empty-state"><p>此工单暂无可查看文件。</p></div>{% endfor %}
     </section>
   </main>
 </body>

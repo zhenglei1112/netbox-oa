@@ -1,6 +1,6 @@
 {% if detail.order.status == 'draft' and material.key == 'order' %}
   {% if detail.can_change %}
-    <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+    <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}{% if workbench_v2 %}?ui=v2{% endif %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
   {% endif %}
 {% elif not material.requires_filling %}
   {% if material.required_now and detail.can_act and material.can_upload_now and perms.netbox_oa.add_maintenancedocument %}
@@ -10,7 +10,7 @@
 {% elif material.required_now %}
   {% if material.requires_filling and detail.can_act and material.can_fill %}
     {% if material.key == 'order' and detail.order_correction %}
-      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}{% if workbench_v2 %}?ui=v2{% endif %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
     {% else %}
       <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenance_company_form' pk=detail.order.pk material=material.key %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
     {% endif %}

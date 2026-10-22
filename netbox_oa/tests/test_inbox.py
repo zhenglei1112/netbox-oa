@@ -105,7 +105,7 @@ class InboxTests(TestCase):
         self.assertEqual(response.context["tab"], "done")
         self.assertEqual(response.context["total"], 1)
         self.assertEqual([row["order"].pk for row in response.context["rows"]], [self.order.pk])
-        self.assertContains(response, "你处理完成的")
+        self.assertContains(response, "已办工单")
         self.assertIn("tab=done", response.context["list_url"])
         self.assertEqual(self.page(tab="done", q=self.order.number).context["total"], 1)
         self.assertEqual(self.page(tab="done", q="does-not-exist").context["total"], 0)
@@ -173,8 +173,10 @@ class InboxTests(TestCase):
     def test_payment_error_shows_every_missing_material_without_state_explanation(self):
         self.reach("payment_eip")
         response = self.action("complete", {"external_reference": "EIP-001"})
-        self.assertContains(response, "请上传以下材料：付款通知书、电子发票、合同复印件。",
-                            status_code=400)
+        self.assertContains(
+            response, "请上传以下材料：付款通知书、电子发票、合同复印件、发票验真结果。",
+            status_code=400,
+        )
         self.assertNotContains(response, "材料状态至少", status_code=400)
 
     def test_material_filling_classification_applies_to_every_material(self):
@@ -282,11 +284,13 @@ class InboxTests(TestCase):
         self.assertNotContains(printed, 'class="print-toolbar"')
         self.assertEqual(printed["X-Frame-Options"], "SAMEORIGIN")
         empty = self.client.get(url, {"material": "settlement"})
-        self.assertContains(empty, "此材料暂无可查看文件")
+        self.assertIsNone(empty.context["selected"])
+        self.assertTrue(empty.context["review_items"])
+        self.assertContains(empty, 'aria-label="材料预览"')
         self.assertEqual(self.client.get(url, {"material": "unknown"}).status_code, 404)
         self.assertEqual(self.client.get(url, {"document": 99999}).status_code, 404)
 
-    def test_review_file_types_keep_their_columns_and_selected_version(self):
+    def test_review_file_types_keep_their_order_and_selected_version(self):
         self.reach("order_seal")
         self.upload("order", sealed=True)
         self.client.force_login(self.actor)
@@ -645,7 +649,9 @@ class InboxTests(TestCase):
         self.assertEqual(viewer["X-Frame-Options"], "SAMEORIGIN")
         self.assertContains(viewer, "?embed=1&amp;material=report")
         self.assertNotContains(viewer, "返回审批")
-        self.assertNotContains(viewer, "<header")
+        self.assertNotContains(viewer, 'class="oa-review-header"')
+        self.assertContains(viewer, 'class="review-document-heading"')
+        self.assertNotContains(viewer, "data-pdf-viewer")
         review_panel = (
             opened.content.decode().split('id="review-order"', 1)[1].split("</dialog>", 1)[0]
         )
@@ -679,6 +685,7 @@ class InboxTests(TestCase):
         self.client.force_login(worker)
         response = self.client.get(url, {"material": "report"})
         self.assertIsNone(response.context["selected"])
+        self.assertEqual(response.context["review_items"], [])
         self.assertEqual(self.client.get(preview_url).status_code, 404)
         outsider = type(self.actor).objects.create_user("no_order_access", password="test")
         self.grant(outsider, "maintenancedocument", "view")

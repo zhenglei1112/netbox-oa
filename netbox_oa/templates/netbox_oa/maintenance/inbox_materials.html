@@ -9,7 +9,17 @@
 {% with review_id='review-'|add:material.key %}
 <dialog class="oa-panel oa-review-panel" id="{{ review_id }}" aria-label="材料审阅" {% if panel_id == review_id %}open{% endif %}>
   <header class="oa-review-header"><strong>{{ detail.order.number }}</strong><a data-oa-close class="btn btn-ghost-secondary oa-close" href="{{ detail_url }}" aria-label="关闭材料审阅">×</a></header>
-  <iframe class="oa-review-frame" title="{{ material.name }}审阅" data-review-src="{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ material.key }}&amp;embed=1" {% if panel_id == review_id %}src="{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ material.key }}&amp;embed=1"{% endif %}></iframe>
+  <div class="oa-review-body">
+  <div data-review-loading class="oa-review-loading">
+    <nav aria-label="材料目录">
+      {% for item in detail.materials %}
+      <a class="oa-review-directory-item" href="{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ item.key }}&amp;embed=1" target="{{ review_id }}-frame">{{ item.name }}</a>
+      {% endfor %}
+    </nav>
+    <p role="status" class="p-3">正在加载材料预览，请稍候…</p>
+  </div>
+  <iframe name="{{ review_id }}-frame" class="oa-review-frame" title="{{ material.name }}审阅" data-review-src="{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ material.key }}&amp;embed=1" {% if panel_id == review_id %}src="{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ material.key }}&amp;embed=1"{% endif %}></iframe>
+  </div>
 </dialog>
 {% endwith %}
 <dialog class="oa-panel oa-material-panel" id="material-{{ material.key }}" aria-labelledby="material-title-{{ material.key }}" {% if panel_id == 'material-'|add:material.key %}open{% endif %}>
@@ -21,7 +31,6 @@
   </nav>
   <div class="oa-panel-body">
     <section data-oa-tab-panel="files" {% if panel_pane == 'versions' or panel_pane == 'upload' %}hidden{% endif %} aria-label="当前文件">
-      {% if material.required_now %}<div class="oa-panel-note">当前办理节点需要此类材料，请核对文件及签章状态。</div>{% endif %}
       {% if material.form_document %}<div class="oa-file-row"><span class="oa-file-icon" aria-hidden="true">▤</span><div><strong>填写表单{% if material.key == 'report' %}（甲方部分）{% endif %}</strong><span>v{{ material.form_document.version }} · {{ material.form_document.created|date:'Y-m-d H:i' }}</span></div><a class="btn btn-ghost-primary" href="{% if material.requires_filling %}{% url 'plugins:netbox_oa:maintenance_print' pk=material.form_document.pk %}{% else %}{% url 'plugins:netbox_oa:maintenance_review' pk=detail.order.pk %}?material={{ material.key }}&amp;document={{ material.form_document.pk }}{% endif %}" target="_blank" rel="noopener">{% if material.requires_filling %}查看 / 打印表单{% else %}查阅{% endif %}</a></div>{% endif %}
       {% if material.attachment %}<div class="oa-file-row"><span class="oa-file-icon" aria-hidden="true">▧</span><div><strong>{{ material.attachment.short_name|default:material.name }}</strong><span>附件 v{{ material.attachment.version }} · {{ material.attachment.get_state_display }}</span></div><a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=material.attachment.pk %}">下载附件</a></div>{% endif %}
       {% if material.scanned_material %}<h3>本次{{ material.name }} · {{ material.scan_sources|length }} 份</h3>{% for scan in material.scan_sources %}<div class="oa-file-row"><div><strong title="原文件：{{ scan.original_name }}">{{ scan.short_name }}</strong><span>扫描版{{ material.name }} · v{{ scan.version }}</span></div><a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=scan.pk %}">下载扫描件</a>{% if scan.sealed_scan %}<a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=scan.sealed_scan.pk %}">下载用印扫描件</a>{% endif %}</div>{% empty %}<p>尚未上传本次扫描版{{ material.name }}。</p>{% endfor %}{% endif %}

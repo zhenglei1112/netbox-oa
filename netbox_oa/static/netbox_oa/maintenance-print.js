@@ -1,16 +1,43 @@
 (() => {
   const button = document.getElementById('print-document');
+  const settings = button?.dataset.auditUrl ? button.dataset : document.body.dataset;
+  if (!settings.auditUrl) return;
   let codes = [];
   let feedback;
+  let printRequest;
   const clear = () => {
     for (const code of codes) code.remove();
     codes = [];
   };
-  window.addEventListener('afterprint', clear);
-  button.addEventListener('click', async () => {
+  function report(text) {
+    feedback?.remove();
+    feedback = document.createElement('span');
+    feedback.setAttribute('role', 'alert');
+    feedback.textContent = text;
+    if (button) button.after(feedback);
+    else document.body.append(feedback);
+  }
+  function recordPrint() {
+    if (!printRequest) {
+      printRequest = fetch(settings.auditUrl, {
+        method: 'POST', credentials: 'same-origin', keepalive: true,
+        headers: {'X-CSRFToken': settings.csrfToken},
+      }).then(response => {
+        if (!response.ok) throw new Error('无法保存打印操作记录');
+      }).catch(error => {printRequest = undefined; throw error;});
+    }
+    return printRequest;
+  }
+  window.addEventListener('afterprint', () => {clear(); printRequest = undefined;});
+  // Covers the browser's print shortcut on this HTML page as well as the button.
+  window.addEventListener('beforeprint', () => recordPrint().catch(() => {
+    report('打印操作记录保存失败，请检查登录状态后重试。');
+  }));
+  button?.addEventListener('click', async () => {
     clear();
     feedback?.remove();
     button.disabled = true;
+    let errorText = '打印码加载失败，请重新点击打印。';
     try {
       for (const template of document.querySelectorAll('.print-code-template')) {
         const code = template.content.firstElementChild.cloneNode(true);
@@ -19,13 +46,13 @@
       }
       await Promise.all(codes.flatMap(code => [...code.querySelectorAll('img')])
         .map(image => image.decode()));
+      errorText = '打印操作记录保存失败，请检查登录状态后重试。';
+      await recordPrint();
+      errorText = '无法打开打印窗口，请重新点击打印。';
       window.print();
     } catch {
       clear();
-      feedback = document.createElement('span');
-      feedback.setAttribute('role', 'alert');
-      feedback.textContent = '打印码加载失败，请重新点击打印。';
-      button.after(feedback);
+      report(errorText);
     } finally {
       button.disabled = false;
     }

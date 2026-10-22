@@ -13,7 +13,12 @@ from users.models import Group
 
 from .maintenance_contracts import region_ids_from_names, selected_contract
 from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES, build_steps, scan_fill_key
-from .maintenance_materials import COMPANY_FORMS, ORDER_FORM_FIELDS, company_form_initial
+from .maintenance_materials import (
+    COMPANY_FORMS,
+    ORDER_FORM_FIELDS,
+    PRINTABLE_FORMS,
+    company_form_initial,
+)
 from .maintenance_numbering import issue_number, number_from_token
 from .models import (
     MaintenanceDocument,
@@ -29,9 +34,12 @@ from .services import _allowed, _require_actor, _save, _snapshot, _transition
 
 
 def _event(order, actor, action, description, task=None, **details):
-    return MaintenanceEvent.objects.create(
+    event = MaintenanceEvent(
         order=order, actor=actor, task=task, action=action, description=description, details=details
     )
+    event._changelog_message = event.operation_summary
+    event.save()
+    return event
 
 
 def _order(pk, actor, action="change"):
@@ -184,9 +192,9 @@ def create_order(*, actor, policy, number_token=None, changelog_message="", **da
     MaintenanceNumberReservation.objects.filter(number=number, actor=actor).update(used=True)
     if not MaintenanceOrder.objects.restrict(actor, "add").filter(pk=order.pk).exists():
         raise PermissionDenied("新工单不符合新增权限约束。")
-    _event(order, actor, "create", "创建维护服务工单")
+    _event(order, actor, "create", "创建维护服务工单", changelog_message=changelog_message)
     _require_actor(actor, MaintenanceDocument, "add")
-    _create_company_document(order, actor, "order", company_form_initial(order))
+    _create_company_document(order, actor, "order", company_form_initial(order), audit=False)
     return order
 
 
@@ -250,6 +258,8 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
     if not data:
         if changelog_message:
             _save(order)
+        _event(order, actor, "save", "保存工单资料（内容未变）",
+               fields=[], changelog_message=changelog_message)
         return order
     for key, value in data.items():
         setattr(order, key, value)
@@ -260,8 +270,9 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
         _require_actor(actor, MaintenanceDocument, "add")
         form_data = dict(previous.form_data)
         form_data.update({key: getattr(order, key) for key in ORDER_FORM_FIELDS})
-        _create_company_document(order, actor, "order", form_data)
-    _event(order, actor, "edit", "修改工单资料", fields=sorted(data))
+        _create_company_document(order, actor, "order", form_data, audit=False)
+    _event(order, actor, "edit", "修改并保存工单资料", fields=sorted(data),
+           changelog_message=changelog_message)
     return order
 
 
@@ -406,8 +417,13 @@ def remove_document(*, pk, actor):
         material=document.material, kind=document.kind, is_sealed=document.is_sealed,
         item_number=document.item_number, removed_at__isnull=True,
     ) if document.item_number else order.documents.none()
-    removed_ids = [document.pk, *history.values_list("pk", flat=True)]
-    history.update(removed_at=document.removed_at)
+    removed_ids = [document.pk]
+    for previous in history:
+        _snapshot(previous)
+        previous.removed_at = document.removed_at
+        previous._changelog_message = "删除同份材料的历史版本，保留文件及审批关联"
+        _save(previous)
+        removed_ids.append(previous.pk)
     node = order.steps_snapshot[current.position]
     if node["key"] == scan_fill_key(document.material):
         # Deleting unwanted items is an explicit revision of the submission set.
@@ -486,6 +502,27 @@ def _materials(order, node):
 def _comment(comment, required=False):
     if len(comment) > 4000 or (required and not comment.strip()):
         raise ValidationError("请填写处理意见，最多 4000 字符。")
+
+
+@transaction.atomic
+def record_order_view(*, pk, actor):
+    _allowed(MaintenanceOrder, actor, "view", pk)
+    order = MaintenanceOrder.objects.get(pk=pk)
+    return _event(order, actor, "view", "打开流程（查阅流程）")
+
+
+@transaction.atomic
+def record_form_print(*, pk, actor):
+    """Record a print initiation, without changing the form or its business version."""
+    _allowed(MaintenanceDocument, actor, "view", pk)
+    document = MaintenanceDocument.objects.select_related("order").get(pk=pk)
+    _allowed(MaintenanceOrder, actor, "view", document.order_id)
+    if document.kind != "form" or document.material not in PRINTABLE_FORMS:
+        raise ValidationError("仅公司表单支持通过插件发起打印。")
+    return _event(
+        document.order, actor, "print", "打印表单",
+        document_id=document.pk, material=document.material, version=document.version,
+    )
 
 
 @transaction.atomic
@@ -679,6 +716,7 @@ def terminate_order(*, pk, actor, comment):
         raise PermissionDenied("涉及已发生服务或费用，终止工单仅允许超级管理员办理。")
     _transition(order, "terminate", actor, comment)
     for task in order.tasks.filter(status="pending"):
+        _snapshot(task)
         _transition(task, "cancel", actor, comment)
         task.completed_at, task.decided_by, task.comment = timezone.now(), actor, comment
         _save(task)
@@ -702,9 +740,13 @@ def withdraw_order(*, pk, actor, comment=""):
 def follow_order(*, pk, actor):
     order = _order(pk, actor, "view")
     if order.followers.filter(pk=actor.pk).exists():
+        order._changelog_message = "取消关注工单"
         order.followers.remove(actor)
+        _event(order, actor, "unfollow", "取消关注工单")
     else:
+        order._changelog_message = "关注工单"
         order.followers.add(actor)
+        _event(order, actor, "follow", "关注工单")
     return order
 
 
@@ -732,7 +774,7 @@ def check_company_form_access(order, actor, material):
                 raise PermissionDenied("只有当前填报人员可以修改工单表单。")
 
 
-def _create_company_document(order, actor, material, data):
+def _create_company_document(order, actor, material, data, *, audit=True):
     if material == "order":
         data = {
             **data,
@@ -761,6 +803,7 @@ def _create_company_document(order, actor, material, data):
         material=material,
         version=version,
         document_id=document.pk,
+        audit=audit,
     )
     return document
 
@@ -931,6 +974,9 @@ def upload_document(
     if current and task_is_assigned(current, actor):
         if MaintenanceTask.objects.restrict(actor, "change").filter(pk=current.pk).exists():
             _begin_task(current, actor)
+    document._changelog_message = (
+        f"{'上传覆盖材料' if replaces else '上传材料'}：{document}"
+    )[:200]
     document.save()
     try:
         _allowed(MaintenanceDocument, actor, "add", document.pk)
@@ -939,6 +985,7 @@ def upload_document(
             actor,
             "upload",
             "上传扫描件" if scan else "上传乙方或业务附件",
+            task=current,
             material=material,
             version=version,
             document_id=document.pk,

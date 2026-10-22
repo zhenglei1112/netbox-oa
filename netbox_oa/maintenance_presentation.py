@@ -72,7 +72,7 @@ class InboxPresentation:
             self.tasks[task.order_id].append(task)
         self.events = MaintenanceEvent.objects.restrict(user, "view").filter(
             Q(task__isnull=True) | Q(task__in=visible_tasks)
-        )
+        ).exclude(action__in={"view", "preview", "download", "print"})
         self.started_at = dict(
             self.events.filter(order_id__in=ids, action="start")
             .order_by()

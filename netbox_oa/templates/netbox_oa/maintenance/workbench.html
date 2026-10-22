@@ -4,7 +4,7 @@
 {% block content %}
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
 <script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}?v=20261022-1">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261018-1">
@@ -12,6 +12,7 @@
   <header class="oa-heading">
     <div><h1>维护服务工单</h1></div>
     <div class="btn-list">
+      <a class="btn btn-ghost-primary" data-oa-version-switch href="{{ version_switch_url }}">体验新版办理 v2</a>
       {% if perms.netbox_oa.add_maintenanceorder %}<a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_add' %}">＋ 发起维护服务工单</a>{% endif %}
     </div>
   </header>
@@ -81,6 +82,6 @@
     {% include 'netbox_oa/maintenance/inbox_activity.html' %}
   </div>
 </div>
-<script src="{% static 'netbox_oa/maintenance-inbox.js' %}" defer></script>
+<script src="{% static 'netbox_oa/maintenance-inbox.js' %}?v=20261022-1" defer></script>
 <script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}?v=20261018-2" defer></script>
 {% endblock %}

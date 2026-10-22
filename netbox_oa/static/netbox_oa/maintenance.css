@@ -135,3 +135,9 @@ html.oa-panel-open{overflow:hidden}.oa-panel{width:min(620px,100%);max-width:100
 .oa-panel.oa-review-panel{width:min(1440px,96vw)}.oa-review-frame{display:block;width:100%;flex:1;min-height:0;border:0;background:var(--tblr-bg-surface,var(--bs-body-bg))}
 
 .oa-review-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;min-height:48px;padding:8px 16px;border-bottom:1px solid var(--oa-border);background:var(--oa-panel-bg,#fff)}
+
+.oa-review-body{position:relative;display:flex;flex:1;min-height:0}
+.oa-review-loading{position:absolute;inset:0;z-index:1;display:grid;grid-template-columns:min(32%,320px) 1fr;background:var(--oa-panel-bg,#fff)}
+.oa-review-loading[hidden]{display:none}
+.oa-review-loading nav{overflow:auto;padding:16px;border-right:1px solid var(--oa-border)}
+.oa-review-directory-item{display:block;margin-bottom:12px;padding:12px;background:var(--tblr-bg-surface-secondary,#f3f4f6);color:var(--tblr-primary,#008c95);font-weight:700;border-radius:6px}

@@ -9,15 +9,17 @@ function setup(embedded, triggerAvailable = true) {
   let opened = 0;
   let prevented = false;
   let selector;
-  const navigation = {addEventListener(_, callback) { handler = callback; }};
-  const main = {append() {}};
-  const window = {};
-  window.parent = embedded ? {document: {querySelector(value) {
+  const navigation = {querySelectorAll: () => [], addEventListener(_, callback) { handler = callback; }};
+  const main = {dataset: {}, querySelectorAll: () => [], parentElement: {append() {}}, addEventListener() {}};
+  const window = {addEventListener() {}};
+  window.parent = embedded ? {postMessage() {}, document: {querySelector(value) {
     selector = value;
     return triggerAvailable ? {click() { opened++; }} : null;
   }}} : window;
   runInNewContext(source, {
-    window,
+    window, location: {origin: 'https://oa.test'},
+    IntersectionObserver: class {observe() {}},
+    ResizeObserver: class {observe() {}},
     document: {
       querySelector: value => value === 'aside nav' ? navigation : main,
       createElement: () => ({setAttribute() {}}),

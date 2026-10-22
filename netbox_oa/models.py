@@ -292,7 +292,21 @@ class MaintenanceNumberReservation(models.Model):
     used = models.BooleanField(default=False)
 
 
-class MaintenanceOrder(WorkflowStateModel):
+class MaintenanceChangeLogMixin:
+    """Business actions are logged once through MaintenanceEvent, not per model save."""
+
+    def to_objectchange(self, action):
+        if action != "delete":
+            return None
+        # NetBox's pre_delete handler requires an ObjectChange rather than None.
+        # Preserve its contract for direct administrative deletion of model objects.
+        change = super().to_objectchange(action)
+        if hasattr(self, "order_id"):
+            change.related_object = self.order
+        return change
+
+
+class MaintenanceOrder(MaintenanceChangeLogMixin, WorkflowStateModel):
     number = models.CharField(max_length=40, unique=True, verbose_name="工单编号")
     policy = models.ForeignKey(MaintenancePolicy, on_delete=models.PROTECT, verbose_name="流程配置")
     requester = models.ForeignKey(
@@ -405,7 +419,7 @@ class MaintenanceOrder(WorkflowStateModel):
         pass
 
 
-class MaintenanceTask(WorkflowStateModel):
+class MaintenanceTask(MaintenanceChangeLogMixin, WorkflowStateModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="tasks")
     position = models.PositiveIntegerField()
     name = models.CharField(max_length=200)
@@ -524,7 +538,7 @@ class MaintenanceGroupReservation(models.Model):
         constraints = [models.UniqueConstraint(fields=("order", "group"), name="oa_order_group")]
 
 
-class MaintenanceDocument(ChangeLoggedModel):
+class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="documents")
     material = models.CharField(max_length=20, choices=MATERIALS)
     version = models.PositiveIntegerField()
@@ -566,11 +580,19 @@ class MaintenanceDocument(ChangeLoggedModel):
     def get_absolute_url(self):
         return reverse("plugins:netbox_oa:maintenance_download", args=[self.pk])
 
+    def __str__(self):
+        return f"{self.order.number} · {self.short_name}"
+
     @property
     def display_name(self):
         if self.kind == "form":
             return self.original_name
         return f"{self.order.number}_{self.short_name}"
+
+    @property
+    def is_direct_scan(self):
+        """Payment evidence is uploaded directly, without stamping approval."""
+        return self.material in {"notice", "invoice", "contract", "verification"}
 
     @property
     def short_name(self):
@@ -579,7 +601,10 @@ class MaintenanceDocument(ChangeLoggedModel):
         from pathlib import Path
 
         label = dict(MATERIALS)[self.material]
-        state = "用印后" if self.is_sealed else "审批件" if self.kind == "scan" else "附件"
+        state = (
+            "扫描件" if self.is_direct_scan else
+            "用印后" if self.is_sealed else "审批件" if self.kind == "scan" else "附件"
+        )
         number = f"_{self.item_number:02d}" if self.item_number else ""
         return (
             f"{label}{number}_{state}_v{self.version}"
@@ -605,6 +630,52 @@ class MaintenanceEvent(ChangeLoggedModel):
     description = models.TextField()
     details = models.JSONField(default=dict, blank=True)
 
+    def __str__(self):
+        return f"{self.order.number} · {self.operation_summary}"
+
+    AUDIT_OPERATIONS = {
+        "create": "创建流程",
+        "start": "批转流程",
+        "complete": "批转流程",
+        "return": "批转流程",
+        "transfer": "批转流程",
+        "countersign": "批转流程",
+        "view": "打开流程（查阅流程）",
+        "form": "保存表单",
+        "edit": "保存表单",
+        "save": "保存表单",
+        "print": "打印表单",
+        "upload": "上传材料",
+        "remove_material": "删除材料",
+    }
+
+    @property
+    def operation_summary(self):
+        return self.AUDIT_OPERATIONS.get(self.action, self.description)[:200]
+
+    def to_objectchange(self, action):
+        if action == "delete":
+            return super().to_objectchange(action)
+        if (action != "create" or self.action not in self.AUDIT_OPERATIONS
+                or not self.details.get("audit", True)):
+            return None
+        change = super().to_objectchange(action)
+        change.related_object = self.order
+        change.message = self.operation_summary
+        change.object_repr = f"{self.order.number} · {self.operation_summary}"[:200]
+        # Keep the global audit concise. Full comments and workflow evidence remain
+        # in the existing business history instead of being duplicated in ObjectChange.
+        change.postchange_data = {
+            "order": self.order_id, "number": self.order.number,
+            "operation": self.operation_summary, "action": self.action,
+        }
+        if self.task_id:
+            change.postchange_data["task"] = self.task_id
+        for key in ("document_id", "material", "version", "item_number", "target_user"):
+            if self.details.get(key) is not None:
+                change.postchange_data[key] = self.details[key]
+        return change
+
     def get_absolute_url(self):
         return self.order.get_absolute_url()
 
@@ -614,7 +685,7 @@ class MaintenanceEvent(ChangeLoggedModel):
         verbose_name_plural = "维护工单操作记录"
 
 
-class MaintenanceLink(ChangeLoggedModel):
+class MaintenanceLink(MaintenanceChangeLogMixin, ChangeLoggedModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="links")
     object_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
     object_id = models.PositiveBigIntegerField()

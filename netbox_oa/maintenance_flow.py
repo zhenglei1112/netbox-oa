@@ -217,7 +217,8 @@ def build_steps(groups, sla_hours):
         "payment_eip",
         "付款",
         "external",
-        required=(("notice", "electronic"), ("invoice", "electronic"), ("contract", "electronic")),
+        required=(("notice", "electronic"), ("invoice", "electronic"),
+                  ("contract", "electronic"), ("verification", "electronic")),
         payment="requested",
     )
     return nodes

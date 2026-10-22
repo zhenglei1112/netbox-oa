@@ -7,6 +7,14 @@
   let pendingPop;
   let searchTimer;
   let searchInFlight = false;
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.data?.type !== 'oa-review-ready') return;
+    for (const frame of root().querySelectorAll('[data-review-src]')) {
+      if (event.source !== frame.contentWindow) continue;
+      const loading = frame.closest('dialog').querySelector('[data-review-loading]');
+      if (loading) loading.hidden = true;
+    }
+  });
   history.scrollRestoration = "manual";
   const root = () => document.querySelector('.oa-inbox');
   const list = () => root().querySelector('.oa-order-list');
@@ -72,11 +80,13 @@
     document.documentElement.classList.toggle('oa-panel-open', Boolean(root().querySelector('dialog[open]')));
   }
   document.addEventListener('close', (event) => {
+    if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-panel') && !root().querySelector('dialog[open]')) {
       document.documentElement.classList.remove('oa-panel-open');
     }
   }, true);
   document.addEventListener('click', (event) => {
+    if (typeof event.target?.closest !== 'function') return;
     const trigger = event.target.closest('.oa-inbox [data-oa-open], .oa-inbox [data-oa-close], .oa-inbox [data-oa-tab]');
     if (!trigger || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button) return;
     if (trigger.hasAttribute('data-oa-tab')) {
@@ -99,7 +109,7 @@
       if (!panel.open) panel.showModal();
       if (panel.classList.contains('oa-review-panel')) {
         const frame = panel.querySelector('[data-review-src]');
-        if (frame) frame.src = frame.dataset.reviewSrc;
+        if (frame && !frame.getAttribute('src')) frame.src = frame.dataset.reviewSrc;
       }
       document.documentElement.classList.add('oa-panel-open');
       if (trigger.dataset.oaEvent) {
@@ -113,6 +123,7 @@
     }
   });
   document.addEventListener('keydown', (event) => {
+    if (typeof event.target?.closest !== 'function') return;
     const link = event.target.closest('[data-oa-tab]');
     if (!link || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -124,6 +135,7 @@
   });
   document.addEventListener('change', (event) => {
     const input = event.target;
+    if (typeof input?.matches !== 'function') return;
     if (!input.matches('.oa-file-drop input[type=file]')) return;
     const label = input.closest('.oa-file-drop');
     label.querySelector('strong').textContent = input.files.length
@@ -144,14 +156,17 @@
     }, 300);
   }
   document.addEventListener('input', event => {
+    if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) {
       queueSearch(event.target, event.isComposing);
     }
   });
   document.addEventListener('compositionstart', event => {
+    if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) queueSearch(event.target, true);
   });
   document.addEventListener('compositionend', event => {
+    if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) queueSearch(event.target);
   });
   async function navigate(url, {mode = 'all', pop = false, state, method = 'GET', body} = {}) {
@@ -176,13 +191,16 @@
     }
     try {
       const response = await fetch(url, {method, body, signal: controller.signal,
-        credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+        credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest', 'X-OA-Navigation': mode}});
       const page = new DOMParser().parseFromString(await response.text(), 'text/html');
       const next = page.querySelector('.oa-inbox');
       if (requestSequence !== sequence) return;
       if (!next || (!response.ok && ![400, 403].includes(response.status))) {
         throw new Error('page-unavailable');
       }
+      const versionSwitch = root().querySelector('[data-oa-version-switch]');
+      const nextSwitch = next.querySelector('[data-oa-version-switch]');
+      if (versionSwitch && nextSwitch) versionSwitch.href = nextSwitch.href;
       if (mode === 'search') {
         // Keep the input, caret, and any unfinished handling form in place.
         list().replaceWith(next.querySelector('.oa-order-list'));
@@ -259,6 +277,7 @@
     }
   }
   document.addEventListener('click', (event) => {
+    if (typeof event.target?.closest !== 'function') return;
     const link = event.target.closest('.oa-inbox a[data-oa-select], .oa-inbox a[data-oa-nav], .oa-inbox a[data-oa-history], .oa-inbox a[data-oa-back]');
     if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button) return;
     event.preventDefault();
@@ -281,6 +300,7 @@
   });
   document.addEventListener('submit', async (event) => {
     const form = event.target;
+    if (typeof form?.matches !== 'function') return;
       if (event.submitter?.hasAttribute('data-oa-native')) return;
     if (!form.matches('.oa-inbox form[data-oa-action], .oa-inbox .oa-filters')) return;
     event.preventDefault();
