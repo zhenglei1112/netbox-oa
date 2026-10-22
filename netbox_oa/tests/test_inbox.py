@@ -151,6 +151,27 @@ class InboxTests(TestCase):
         self.assertNotIn('aria-label="上传"', card)
         self.assertNotIn('aria-label="审阅"', card)
 
+    def test_seal_stages_hide_upload_and_reject_upload_page(self):
+        self.start()
+        for material in ("order", "report", "settlement"):
+            while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_seal":
+                self.complete()
+            response = self.page()
+            item = next(item for item in response.context["detail"]["materials"]
+                        if item["key"] == material)
+            self.assertFalse(item["can_upload_now"])
+            self.assertFalse(item["can_seal_scans"])
+            self.assertFalse(item["stage_upload_required"])
+            self.assertFalse(services.material_maintenance_documents(
+                self.order, self.current(), material,
+            ).exists())
+            response = self.client.get(
+                reverse("plugins:netbox_oa:maintenance_material_upload",
+                        args=[self.order.pk, material]),
+            )
+            self.assertEqual(response.status_code, 403)
+            self.complete()
+
     def test_sealing_stages_offer_upload_and_view_without_print(self):
         self.reach("order_scan_fill")
         response = self.page()
@@ -158,7 +179,7 @@ class InboxTests(TestCase):
             "</article>", 1
         )[0]
         self.assertIn('aria-label="打印"', card)
-        for stage in ("order_seal", "report_seal", "settlement_seal"):
+        for stage in ("order_sealed_upload", "report_sealed_upload", "settlement_sealed_upload"):
             while self.order.steps_snapshot[self.current().position]["key"] != stage:
                 self.complete()
             with self.subTest(stage=stage):
@@ -291,7 +312,7 @@ class InboxTests(TestCase):
         self.assertEqual(self.client.get(url, {"document": 99999}).status_code, 404)
 
     def test_review_file_types_keep_their_order_and_selected_version(self):
-        self.reach("order_seal")
+        self.reach("order_sealed_upload")
         self.upload("order", sealed=True)
         self.client.force_login(self.actor)
         response = self.client.get(
@@ -376,7 +397,7 @@ class InboxTests(TestCase):
     def test_sealing_upload_notice_requires_every_current_original(self):
         self.reach("report_fill")
         sources = [self.upload("report"), self.upload("report")]
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         response = self.page()
         self.assertContains(response, "本阶段待上传")
@@ -403,7 +424,7 @@ class InboxTests(TestCase):
     def test_sealing_upload_defaults_to_next_missing_original(self):
         self.reach("report_fill")
         sources = [self.upload("report"), self.upload("report")]
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_material_upload",
@@ -425,7 +446,7 @@ class InboxTests(TestCase):
     def test_sealing_notice_accepts_valid_existing_proof_for_current_original(self):
         self.reach("report_fill")
         sources = [self.upload("report"), self.upload("report")]
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         for index, source in enumerate(sources):
             document = services.upload_document(
@@ -506,7 +527,7 @@ class InboxTests(TestCase):
         self.complete()
         self.assertEqual(self.client.get(url).status_code, 403)
         self.assertEqual(self.client.post(url, {}).status_code, 403)
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         page = self.client.get(url)
         self.assertFalse(page.context["batch"])
@@ -524,7 +545,7 @@ class InboxTests(TestCase):
     def test_multiple_sealed_files_require_individual_originals_and_save_atomically(self):
         self.reach("report_fill")
         sources = [self.upload("report"), self.upload("report")]
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_material_upload",
@@ -1128,7 +1149,7 @@ class InboxTests(TestCase):
         self.assertNotContains(response, "<details", status_code=400)
 
     def test_activity_sidebar_keeps_all_nodes_despite_many_operational_events(self):
-        self.reach("report_seal")
+        self.reach("report_sealed_upload")
         for index in range(60):
             MaintenanceEvent.objects.create(
                 order=self.order, actor=self.actor, action="upload",

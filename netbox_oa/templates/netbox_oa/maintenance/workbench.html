@@ -31,13 +31,13 @@
         {% for row in rows %}
         <article class="oa-order {% if detail.order.pk == row.order.pk %}selected{% endif %}" data-order-id="{{ row.order.pk }}">
           <a class="oa-order-select" data-oa-select href="{{ row.url }}" {% if detail.order.pk == row.order.pk %}aria-current="true"{% endif %}>
-            <div class="oa-order-title"><h2>{{ row.order.number }}</h2><span class="oa-status {% if row.assigned_to_me and row.can_act %}oa-mine{% endif %}">{{ row.status_label }}</span></div>
+            <div class="oa-order-title"><h2>{{ row.order.number }}{% if row.order.priority == 'high' %} <span class="badge bg-danger-subtle text-danger-emphasis ms-1 align-middle" title="高优先级" aria-label="高优先级">高</span>{% endif %}</h2><span class="oa-status {% if row.assigned_to_me and row.can_act %}oa-mine{% endif %}">{{ row.status_label }}</span></div>
             <dl class="oa-order-fields">
               <dt>{% if row.order.status == 'draft' %}创建人：{% else %}发起人：{% endif %}</dt><dd>{{ row.requester_name }} - {{ row.initiated_at|date:'Y-m-d H:i'|default:'—' }}</dd>
               <dt>当前阶段：</dt><dd>{{ row.order.get_stage_display }} - {% if row.current %}{{ row.current.name }}{% else %}{{ row.order.get_status_display }}{% endif %}</dd>
             </dl>
           </a>
-          {% if row.order.priority == 'high' or row.deadline_state != 'normal' %}<div class="oa-row-alert">{% if row.order.priority == 'high' %}<span>高优先级</span>{% endif %}{% if row.deadline_state == 'overdue' %}<span class="text-danger">已超时 · 等待 {{ row.waiting }}</span>{% elif row.deadline_state == 'warning' %}<span class="text-warning">即将超时</span>{% endif %}</div>{% endif %}
+          {% if row.deadline_state != 'normal' %}<div class="oa-row-alert">{% if row.deadline_state == 'overdue' %}<span class="text-danger">已超时 · 等待 {{ row.waiting }}</span>{% elif row.deadline_state == 'warning' %}<span class="text-warning">即将超时</span>{% endif %}</div>{% endif %}
         </article>
         {% empty %}<div class="oa-empty">当前范围暂无工单。</div>{% endfor %}
       </div>

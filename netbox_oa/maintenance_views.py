@@ -135,7 +135,7 @@ def presentation(
             else:
                 can_fill = True
         can_upload_now = (
-            node.get("key") in {scan_fill_key(key), f"{key}_seal"}
+            node.get("key") in {scan_fill_key(key), f"{key}_sealed_upload"}
             if key in scan_materials
             else (
                 key != "order"
@@ -158,7 +158,7 @@ def presentation(
         stage_upload_total = stage_upload_count
         stage_materials_adjusted = False
         if key in scan_materials:
-            if node.get("key") == f"{key}_seal":
+            if node.get("key") == f"{key}_sealed_upload":
                 source_ids = {doc.pk for doc in scan_sources}
                 stage_uploads = [
                     doc for doc in stage_uploads
@@ -221,7 +221,7 @@ def presentation(
                 "scanned_material": key in scan_materials,
                 "scan_sources": display_scan_sources,
                 "can_upload_scans": node.get("key") == scan_fill_key(key),
-                "can_seal_scans": node.get("key") == f"{key}_seal",
+                "can_seal_scans": node.get("key") == f"{key}_sealed_upload",
                 "scan_upload_form": MaintenanceScanUploadForm(
                     auto_id=f"id_{key}_batch_%s", material_name=name
                 )
@@ -367,8 +367,10 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                             rules.append("打印服务工单，签字后上传用印前扫描件")
                         if material_key == "settlement":
                             rules.append("本环节不填写结算期")
-                    elif step_key == f"{material_key}_seal":
+                    elif step_key == f"{material_key}_sealed_upload":
                         rules.append("逐份上传对应本次审批原件的用印后扫描件，全部齐备后方可提交")
+                    elif step_key == f"{material_key}_seal":
+                        rules.append("按本次审批通过的材料办理用印，完成后交由发起人上传用印后材料")
                     else:
                         rules.append(f"审核本次提交的全部{material_name}；修改材料须先退回补正")
                 if step["kind"] == "external":
@@ -1109,13 +1111,18 @@ class MaintenanceUploadView(LoginRequiredMixin, View):
 
 @method_decorator(xframe_options_sameorigin, name="dispatch")
 class MaintenanceReviewView(LoginRequiredMixin, View):
-    def get(self, request, pk):
-        order = get_object_or_404(MaintenanceOrder.objects.restrict(request.user, "view"), pk=pk)
+    read_only = False
+
+    def get_order(self, request, pk, **kwargs):
+        return get_object_or_404(MaintenanceOrder.objects.restrict(request.user, "view"), pk=pk)
+
+    def get(self, request, pk, **kwargs):
+        order = self.get_order(request, pk, **kwargs)
         detail = presentation(order, request.user, materials_only=True)
         groups = []
         for material in detail["materials"]:
             can_upload = bool(
-                material["required_now"] and detail["can_act"]
+                not self.read_only and material["required_now"] and detail["can_act"]
                 and material["can_upload_now"]
                 and request.user.has_perm("netbox_oa.add_maintenancedocument")
             )
@@ -1208,6 +1215,7 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
         return render(request, "netbox_oa/maintenance/review.html", {
             "order": order, "groups": groups, "selected_group": group, "selected": selected,
             "review_items": review_items,
+            "read_only": self.read_only,
         })
 
 

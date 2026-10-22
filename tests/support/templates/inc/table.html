@@ -1,0 +1,5 @@
+{% load django_tables2 %}
+<table {{ table.attrs.as_html }}>
+<thead><tr>{% for column in table.columns %}<th>{% if column.orderable %}<a href="{% querystring table.prefixed_order_by_field=column.order_by_alias.next %}">{{ column.header }}</a>{% else %}{{ column.header }}{% endif %}</th>{% endfor %}</tr></thead>
+<tbody>{% for row in table.page.object_list|default:table.rows %}<tr>{% for column, cell in row.items %}<td>{{ cell }}</td>{% endfor %}</tr>{% empty %}<tr><td>{{ table.empty_text }}</td></tr>{% endfor %}</tbody>
+</table>

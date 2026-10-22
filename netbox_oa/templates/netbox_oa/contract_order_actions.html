@@ -1,0 +1,4 @@
+<div class="d-flex justify-content-end gap-1">
+  <a class="btn btn-outline-primary" data-oa-contract-open href="{% url 'plugins:netbox_oa:contract_order_flow' contract_id=record.contract_id pk=record.pk %}" title="查看办理流程" aria-label="查看 {{ record.number }} 办理流程"><i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i></a>
+  <a class="btn btn-outline-info" data-oa-contract-open href="{% url 'plugins:netbox_oa:contract_order_materials' contract_id=record.contract_id pk=record.pk %}" title="查看材料" aria-label="查看 {{ record.number }} 材料"><i class="mdi mdi-file-document-outline" aria-hidden="true"></i></a>
+</div>

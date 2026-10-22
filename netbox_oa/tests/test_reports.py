@@ -29,7 +29,7 @@ class ReportTests(TestCase):
             material="report", pk=self.order.pk, actor=self.actor, files=self.files()
         )
 
-    def test_exact_four_nodes_and_configured_roles(self):
+    def test_exact_five_nodes_and_configured_roles(self):
         nodes = [
             node
             for node in build_steps({"department": 2, "senior": 3}, 24)
@@ -37,10 +37,12 @@ class ReportTests(TestCase):
         ]
         self.assertEqual(
             [node["name"] for node in nodes],
-            ["服务报告", "服务报告用印部门审核", "服务报告用印公司审批", "服务报告用印"],
+            ["服务报告", "服务报告用印部门审核", "服务报告用印公司审批",
+             "服务报告用印", "上传用印后服务报告"],
         )
         self.assertEqual(
-            [node["kind"] for node in nodes], ["submission", "approval", "approval", "action"]
+            [node["kind"] for node in nodes],
+            ["submission", "approval", "approval", "action", "submission"]
         )
         self.assertEqual([nodes[1]["group_id"], nodes[2]["group_id"]], [2, 3])
 
@@ -68,6 +70,8 @@ class ReportTests(TestCase):
             task = services.complete_task(pk=self.current().pk, actor=self.actor)
             self.assertEqual(set(task.evidence["report"]), expected)
         self.assertEqual(self.current().name, "服务报告用印")
+        self.complete()
+        self.assertEqual(self.current().name, "上传用印后服务报告")
         with self.assertRaises(ValidationError) as missing:
             services.complete_task(pk=self.current().pk, actor=self.actor)
         for scan in scans:
@@ -134,6 +138,7 @@ class ReportTests(TestCase):
         upload_url = reverse("plugins:netbox_oa:maintenance_material_upload",
                              args=[self.order.pk, "report"])
         self.assertContains(self.client.get(upload_url), "multiple")
+        self.complete()
         self.complete()
         self.complete()
         self.complete()

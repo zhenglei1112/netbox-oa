@@ -109,9 +109,17 @@ def build_steps(groups, sla_hours):
         "服务工单用印",
         "action",
         "seal",
+        required=(("order", "scan"),),
+    )
+    add(
+        "ordering",
+        "order_sealed_upload",
+        "上传用印后服务工单",
+        "submission",
+        "requester",
         required=(("order", "sealed"),),
     )
-    for node in nodes[-4:]:
+    for node in nodes[-5:]:
         node["scan_material"] = "order"
 
     add(
@@ -146,6 +154,14 @@ def build_steps(groups, sla_hours):
         "服务报告用印",
         "action",
         "seal",
+        required=(("report", "scan"),),
+    )
+    add(
+        "report",
+        "report_sealed_upload",
+        "上传用印后服务报告",
+        "submission",
+        "requester",
         required=(("report", "sealed"),),
     )
     for node in nodes:
@@ -184,6 +200,14 @@ def build_steps(groups, sla_hours):
         "服务结算单用印",
         "action",
         "seal",
+        required=(("settlement", "scan"),),
+    )
+    add(
+        "settlement",
+        "settlement_sealed_upload",
+        "上传用印后服务结算单",
+        "submission",
+        "requester",
         required=(("settlement", "sealed"),),
     )
     for node in nodes:

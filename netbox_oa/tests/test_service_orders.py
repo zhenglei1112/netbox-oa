@@ -39,7 +39,7 @@ class ServiceOrderTests(TestCase):
         nodes = build_steps({"department": 2, "senior": 3, "seal": 4}, 24)
         keys = [node["key"] for node in nodes]
         start = keys.index("order_final") + 1
-        new = nodes[start : start + 4]
+        new = nodes[start : start + 5]
         self.assertEqual(
             [node["name"] for node in new],
             [
@@ -47,6 +47,7 @@ class ServiceOrderTests(TestCase):
                 "服务工单用印部门审核",
                 "服务工单用印公司审批",
                 "服务工单用印",
+                "上传用印后服务工单",
             ],
         )
         self.assertEqual(
@@ -56,9 +57,10 @@ class ServiceOrderTests(TestCase):
                 "department",
                 "senior",
                 "seal",
+                "requester",
             ],
         )
-        self.assertEqual([node["group_id"] for node in new], [None, 2, 3, 4])
+        self.assertEqual([node["group_id"] for node in new], [None, 2, 3, 4, None])
         self.assertEqual(
             [node["return_to"] for node in new[1:3]],
             [
@@ -66,7 +68,7 @@ class ServiceOrderTests(TestCase):
                 "order_scan_fill",
             ],
         )
-        self.assertEqual(nodes[start + 4]["key"], "report_fill")
+        self.assertEqual(nodes[start + 5]["key"], "report_fill")
 
     def test_form_cannot_replace_scan_and_print_is_available(self):
         self.reach_service_order()
@@ -94,6 +96,8 @@ class ServiceOrderTests(TestCase):
             task = services.complete_task(pk=self.current().pk, actor=self.actor)
             self.assertEqual(task.evidence["order"], [scan.pk])
         self.assertEqual(self.current().name, "服务工单用印")
+        self.complete()
+        self.assertEqual(self.current().name, "上传用印后服务工单")
         with self.assertRaisesMessage(ValidationError, "每份"):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         form = self.order.documents.filter(kind="form", material="order").first()

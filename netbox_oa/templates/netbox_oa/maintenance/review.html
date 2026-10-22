@@ -4,16 +4,16 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>审阅 · {{ selected_group.name }} · {{ order.number }}</title>
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
-<script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
+  {% if not read_only %}<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
+<script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>{% endif %}
 <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
 <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
   <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-review.css' %}?v=20261021-10">
   <script src="{% static 'netbox_oa/maintenance-review.js' %}?v=20261022-2" defer></script>
-  <script src="{% static 'netbox_oa/maintenance-review-maintenance.js' %}" defer></script>
+  {% if not read_only %}<script src="{% static 'netbox_oa/maintenance-review-maintenance.js' %}" defer></script>{% endif %}
 </head>
-<body>
+<body data-oa-contract-ready>
   <aside aria-label="材料索引">
     <nav>
       <div class="material-legend" aria-label="文件类型图例">
@@ -54,7 +54,7 @@
     </nav>
   </aside>
   <main>
-    {% if not request.GET.embed %}<a class="btn btn-ghost-secondary review-return" href="{{ order.get_absolute_url }}">返回审批</a>{% endif %}
+    {% if not read_only and not request.GET.embed %}<a class="btn btn-ghost-secondary review-return" href="{{ order.get_absolute_url }}">返回审批</a>{% endif %}
     <section class="document-view" aria-label="材料预览" tabindex="0" data-selected="{{ selected.pk }}" data-material="{{ selected_group.key }}" data-order-number="{{ order.number }}">
       {% for item in review_items %}
       <article class="review-document" id="review-document-{{ item.document.pk }}" data-document="{{ item.document.pk }}" {% if item.document.pk != selected.pk %}hidden{% endif %} data-material="{{ item.group.key }}" data-type="{{ item.type }}" data-title="{{ item.label }}" data-source="{% if item.type == 'form' %}{% url 'plugins:netbox_oa:maintenance_print' pk=item.document.pk %}?embed=1{% else %}{% url 'plugins:netbox_oa:maintenance_preview' pk=item.document.pk %}{% endif %}" aria-label="{{ item.label }}">

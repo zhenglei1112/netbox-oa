@@ -56,13 +56,13 @@ class WorkbenchV2Tests(TestCase):
                  if item["state"] == "current"],
                 [self.order.steps_snapshot[task.position]["stage"]],
             )
-            if key.endswith("_seal") and task.kind == "action":
+            if key.endswith("_sealed_upload"):
                 self.assertContains(response, "逐份关联审批原件")
                 self.assertTrue(response.context["guide"]["pending_uploads"])
             if key == "payment_eip":
                 self.assertContains(response, 'name="external_reference"')
             self.complete()
-        self.assertEqual(len(seen), 17)
+        self.assertEqual(len(seen), 20)
         response = self.page()
         self.assertNotContains(response, 'class="oa-actions"')
         self.assertContains(response, "工单资料库")

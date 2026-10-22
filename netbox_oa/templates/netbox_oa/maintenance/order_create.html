@@ -28,11 +28,11 @@
       </div>
     </div>
     <div class="btn-float-group-right">
-      <a class="btn btn-ghost-secondary btn-float" href="{{ return_url }}">取消</a>
+      <a class="btn btn-outline-secondary btn-float" href="{{ return_url }}">取消</a>
       <div class="btn-group" role="group" aria-label="工单操作">
         <button class="btn btn-primary" type="submit" name="_submit">提交审批</button>
-        <button class="btn btn-ghost-primary" type="submit" name="_save">{% if correction_form %}保存修改{% else %}保存草稿{% endif %}</button>
-        {% if can_add_another %}<button class="btn btn-ghost-primary btn-float" type="submit" name="_addanother">保存草稿并添加另一个</button>{% endif %}
+        <button class="btn btn-outline-primary" type="submit" name="_save">{% if correction_form %}保存修改{% else %}保存草稿{% endif %}</button>
+        {% if can_add_another %}<button class="btn btn-outline-primary btn-float" type="submit" name="_addanother">保存草稿并添加另一个</button>{% endif %}
       </div>
     </div>
   </form>

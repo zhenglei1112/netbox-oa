@@ -56,6 +56,13 @@ def handling_guide(detail):
                 "确认外部付款流程已通过，填写外部流程编号后登记。",
             ]
             tone = "payment"
+        elif key.endswith("_sealed_upload"):
+            title = "上传用印后材料，核对后提交"
+            steps = [
+                "由发起流程的线路主管逐份关联审批原件上传用印件。",
+                "核对用印内容、页数及签章，全部补齐后提交。",
+            ]
+            tone = "submission"
         elif kind == "submission":
             title = "上传本次审批材料，核对后提交"
             steps = [
@@ -64,11 +71,11 @@ def handling_guide(detail):
                 "退回补正后须按本次要求更新材料，再提交审批。",
             ]
             tone = "submission"
-        elif kind == "action" and any(state == "sealed" for _, state in node.get("required", [])):
-            title = "完成用印，逐份上传对应的用印扫描件"
+        elif kind == "action" and key.endswith("_seal"):
+            title = "按审批内容完成用印"
             steps = [
                 "查阅本次审批通过的扫描版本，按审批内容办理用印。",
-                "逐份关联审批原件上传用印件，全部补齐后确认办理完成。",
+                "确认用印完成后提交，交由发起流程的线路主管上传用印后材料。",
             ]
             tone = "seal"
         elif kind in {"approval", "countersign"}:

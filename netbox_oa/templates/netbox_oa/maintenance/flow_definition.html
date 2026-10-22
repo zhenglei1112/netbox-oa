@@ -28,7 +28,7 @@
   <div class="row">
     {% for role in roles %}<div class="col-md-4 mb-2"><strong>{{ role.name }}</strong>：{% if role.group %}{{ role.group.name }}{% elif policy %}<span class="text-warning">未配置</span>{% else %}<span class="text-muted">选择配置后查看</span>{% endif %}</div>{% endfor %}
     <div class="col-md-4 mb-2"><strong>线路主管</strong>：每张工单指定的负责人</div>
-    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、服务工单、服务报告、服务结算单、生成付款</div>
+    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、服务工单、服务报告、服务结算单、三个用印后材料上传环节、生成付款</div>
   </div>
 </div></details>
 <nav class="d-flex flex-wrap gap-2 mb-3" aria-label="流程阶段">

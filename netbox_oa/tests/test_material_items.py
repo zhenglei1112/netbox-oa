@@ -155,7 +155,9 @@ class MaterialItemTests(TestCase):
             file=SimpleUploadedFile("revised.pdf", b"scan"), upload_mode="replace",
             replaces_document_id=first.pk,
         )
-        while self.order.steps_snapshot[self.current().position]["key"] != "settlement_seal":
+        while (
+            self.order.steps_snapshot[self.current().position]["key"] != "settlement_sealed_upload"
+        ):
             self.complete()
         with self.assertRaisesMessage(ValidationError, "必须对应本次审批"):
             services.upload_document(
@@ -213,7 +215,7 @@ class MaterialItemTests(TestCase):
     def test_review_index_pairs_each_item_and_keeps_order_form_on_same_row(self):
         self.reach("report_fill")
         first, other = self.upload("report"), self.upload("report")
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         sealed = services.upload_document(
             pk=self.order.pk, actor=self.actor, material="report", state="scan",
@@ -257,7 +259,7 @@ class MaterialItemTests(TestCase):
         self.assertEqual(draft.context["selected"].kind, "form")
         self.reach("report_fill")
         first, second = self.upload("report"), self.upload("report")
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_seal":
+        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
             self.complete()
         second_sealed = services.upload_document(
             pk=self.order.pk, actor=self.actor, material="report", state="scan",

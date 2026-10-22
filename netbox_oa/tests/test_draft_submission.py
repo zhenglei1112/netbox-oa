@@ -143,14 +143,14 @@ class DraftSubmissionTests(TestCase):
         signature = self.start()
         self.assertEqual(self.current().name, "工单初审")
         self.assertEqual(
-            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 17
+            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 20
         )
         self.assertNotIn("order_fill", [n["key"] for n in self.order.steps_snapshot])
         while self.order.tasks.filter(status="pending").exists():
             self.complete()
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, "completed")
-        self.assertEqual(self.order.tasks.count(), 17)
+        self.assertEqual(self.order.tasks.count(), 20)
         self.assertFalse(self.order.tasks.filter(name="工单修正").exists())
         signature.refresh_from_db()
         self.assertIsNotNone(signature.submitted_at)

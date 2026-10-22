@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = ["django-fsm-2>=4.0,<5", "django-fsm-log>=5.0.2,<6", "qrcode[pil]>=8.2,<9", "python-barcode>=0.16,<1"]
 
 [project.optional-dependencies]
-dev = ["Django==5.2.6", "djangorestframework==3.16.1", "django-filter==25.1", "ruff>=0.11,<1", "build>=1.2,<2", "setuptools>=75"]
+dev = ["Django==5.2.6", "djangorestframework==3.16.1", "django-filter==25.1", "django-tables2>=2.7,<3", "ruff>=0.11,<1", "build>=1.2,<2", "setuptools>=75"]
 
 [tool.setuptools.packages.find]
 include = ["netbox_oa*"]

@@ -1,0 +1,15 @@
+#oa-contract-dialog {
+  width: min(96vw, 1600px);
+  height: 90vh;
+  max-width: 96vw;
+  max-height: 94vh;
+  padding: 0;
+  border: 1px solid var(--tblr-border-color, #ccc);
+  border-radius: .5rem;
+  background: var(--tblr-bg-surface, #fff);
+  color: inherit;
+}
+#oa-contract-dialog[open] { display: flex; flex-direction: column; }
+#oa-contract-dialog::backdrop { background: rgb(0 0 0 / 50%); }
+#oa-contract-dialog iframe { flex: 1; width: 100%; min-height: 0; border: 0; }
+#oa-contract-dialog [hidden] { display: none; }

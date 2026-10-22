@@ -236,9 +236,9 @@ class MaintenanceTests(TestCase):
             )
         ]
         self.assertEqual([node["key"] for node in nodes], [node["key"] for node in expected])
-        self.assertEqual(response.context["node_count"], 17)
+        self.assertEqual(response.context["node_count"], 20)
         self.assertEqual(response.context["correction_count"], 1)
-        self.assertContains(response, "6 个顺序环节")
+        self.assertContains(response, "7 个顺序环节")
         diagram = response.context["diagram"]
         sequential = [
             edge
@@ -271,10 +271,10 @@ class MaintenanceTests(TestCase):
             "服务报告",
         )
         self.assertFalse(
-            next(node for node in nodes if node["key"] == "report_seal")["return_label"]
+            next(node for node in nodes if node["key"] == "report_sealed_upload")["return_label"]
         )
         self.assertEqual(
-            [len(stage["nodes"]) for stage in response.context["stages"]], [7, 4, 4, 3]
+            [len(stage["nodes"]) for stage in response.context["stages"]], [8, 5, 5, 3]
         )
         by_key = {node["key"]: node for node in nodes}
         for key in ("report_fill", "settlement_fill", "payment_plan"):
@@ -282,7 +282,7 @@ class MaintenanceTests(TestCase):
             self.assertIsNone(by_key[key]["group"])
         self.assertIn("至少上传", by_key["report_fill"]["rules"][0])
         self.assertIn("审核本次提交", by_key["report_department_seal"]["rules"][0])
-        self.assertIn("逐份上传", by_key["settlement_seal"]["rules"][0])
+        self.assertIn("逐份上传", by_key["settlement_sealed_upload"]["rules"][0])
         self.assertIn("合同详情页", by_key["payment_plan"]["rules"][0])
         self.assertEqual(by_key["payment_eip"]["completion_label"], "工单完成；付款申请已提交")
         self.assertContains(response, "付款申请已提交 · 工单完成")

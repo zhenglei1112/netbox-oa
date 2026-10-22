@@ -1,0 +1,23 @@
+{% load static django_tables2 %}
+<link rel="stylesheet" href="{% static 'netbox_oa/contract-orders.css' %}">
+<script src="{% static 'netbox_oa/contract-orders.js' %}" defer></script>
+{% url 'plugins:netbox_contract:invoice_add' as oa_invoice_add_url %}
+<section class="card mb-3" id="oa-contract-orders" aria-label="服务工单" data-invoice-add-url="{{ oa_invoice_add_url }}">
+  <h5 class="card-header">服务工单</h5>
+  <div class="table-responsive">{% render_table oa_table 'inc/table.html' %}</div>
+  {% if oa_table.page.has_other_pages %}
+  <nav class="card-footer d-flex align-items-center gap-3" aria-label="关联工单分页">
+    {% if oa_table.page.has_previous %}<a class="btn btn-ghost-primary" href="{% querystring oa_table.prefixed_page_field=oa_table.page.previous_page_number %}">上一页</a>{% endif %}
+    <span>第 {{ oa_table.page.number }} / {{ oa_table.paginator.num_pages }} 页 · 共 {{ oa_table.paginator.count }} 条</span>
+    {% if oa_table.page.has_next %}<a class="btn btn-ghost-primary" href="{% querystring oa_table.prefixed_page_field=oa_table.page.next_page_number %}">下一页</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+<dialog id="oa-contract-dialog" aria-labelledby="oa-contract-dialog-title">
+  <header class="d-flex align-items-center justify-content-between gap-3 border-bottom p-3">
+    <h2 class="h4 mb-0" id="oa-contract-dialog-title">工单查看</h2>
+    <button class="btn btn-ghost-secondary" type="button" data-oa-contract-close aria-label="关闭工单查看"><i class="mdi mdi-close" aria-hidden="true"></i> 关闭</button>
+  </header>
+  <p class="p-3" role="status" data-oa-contract-status>正在加载…</p>
+  <iframe title="工单只读查看" hidden></iframe>
+</dialog>

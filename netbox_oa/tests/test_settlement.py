@@ -47,7 +47,7 @@ class SettlementTests(TestCase):
         payment.contracts.add(order.contract_id)
         return payment
 
-    def test_settlement_has_four_nodes_and_payment_has_three(self):
+    def test_settlement_has_five_nodes_and_payment_has_three(self):
         nodes = [node for node in build_steps({}, 24) if node["stage"] == "settlement"]
         self.assertEqual(
             [node["name"] for node in nodes],
@@ -56,6 +56,7 @@ class SettlementTests(TestCase):
                 "服务结算单用印部门审核",
                 "服务结算单用印公司审批",
                 "服务结算单用印",
+                "上传用印后服务结算单",
             ],
         )
         self.assertEqual(
@@ -65,6 +66,7 @@ class SettlementTests(TestCase):
                 "department",
                 "senior",
                 "seal",
+                "requester",
             ],
         )
 
@@ -107,7 +109,7 @@ class SettlementTests(TestCase):
         self.assertEqual(self.current().name, "服务结算单用印部门审核")
 
     def test_seal_requires_matching_scanned_original(self):
-        self.reach("settlement_seal")
+        self.reach("settlement_sealed_upload")
         with self.assertRaisesMessage(ValidationError, "用印扫描件"):
             services.complete_task(pk=self.current().pk, actor=self.actor)
         with self.assertRaisesMessage(ValidationError, "必须对应本次审批"):

@@ -1,9 +1,20 @@
 from django.urls import path
 
+from . import contract_views
 from . import maintenance_signature_views as signatures
 from . import maintenance_views as views
 
 urlpatterns = [
+    path(
+        "contracts/<int:contract_id>/orders/<int:pk>/flow/",
+        contract_views.ContractOrderFlowView.as_view(),
+        name="contract_order_flow",
+    ),
+    path(
+        "contracts/<int:contract_id>/orders/<int:pk>/materials/",
+        contract_views.ContractOrderMaterialsView.as_view(),
+        name="contract_order_materials",
+    ),
     path(
         "maintenance/v2/",
         views.MaintenanceWorkbenchV2View.as_view(),

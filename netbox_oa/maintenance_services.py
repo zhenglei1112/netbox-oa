@@ -385,7 +385,7 @@ def material_maintenance_documents(order, task, material):
     if node.get("scan_material") == material:
         if node["key"] == scan_fill_key(material):
             return material_scan_candidates(order, material)
-        if node["key"] == f"{material}_seal":
+        if node["key"] == f"{material}_sealed_upload":
             return documents.filter(
                 is_sealed=True, source_document__in=material_scan_sources(order, material),
                 replacement_documents__isnull=True,
@@ -875,8 +875,12 @@ def upload_document(
     else:
         _allowed(MaintenanceOrder, actor, "change", pk)
     scan = state == "scan"
-    # Only the handling step can identify a new scan as a stamping result.
-    is_sealed = bool(scan and current and node["key"] == f"{material}_seal")
+    # Only the post-seal upload step accepts stamping results.
+    is_sealed = bool(scan and current and node["key"] == f"{material}_sealed_upload")
+    if is_sealed:
+        _allowed(MaintenanceTask, actor, "change", current.pk)
+        if not task_is_assigned(current, actor):
+            raise PermissionDenied("只有发起流程的线路主管可以上传用印后材料。")
     if material == "order" and not scan:
         raise ValidationError("维护服务工单请在公司表单中填写生成，只能上传纸质或盖章扫描件。")
     source = order.documents.filter(material=material).exclude(kind="scan").first()
@@ -889,7 +893,7 @@ def upload_document(
             if source_document_id:
                 raise ValidationError(f"上传{label}时请提交扫描版原件，无需关联电子附件。")
             source = None
-        elif node["key"] == f"{material}_seal" and is_sealed:
+        elif node["key"] == f"{material}_sealed_upload" and is_sealed:
             source = material_scan_sources(order, material).filter(pk=source_document_id).first()
             if not source:
                 raise ValidationError(f"用印扫描件必须对应本次审批的{label}。")

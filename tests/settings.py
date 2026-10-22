@@ -18,6 +18,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_tables2",
     "tests.support.users.apps.UsersConfig",
     "tests.support.contracts.apps.ContractsConfig",
     "tests.support.dcim.apps.DCIMConfig",
@@ -64,8 +65,38 @@ TEMPLATES = [
 netbox = types.ModuleType("netbox")
 plugins = types.ModuleType("netbox.plugins")
 plugins.PluginConfig = AppConfig
+
+
+class PluginTemplateExtension:
+    def __init__(self, context):
+        self.context = context
+
+    def render(self, template, extra_context=None):
+        from django.template.loader import render_to_string
+
+        return render_to_string(
+            template, {**self.context, **(extra_context or {})},
+            request=self.context["request"],
+        )
+
+
+plugins.PluginTemplateExtension = PluginTemplateExtension
 sys.modules["netbox"] = netbox
 sys.modules["netbox.plugins"] = plugins
+
+netbox_tables = types.ModuleType("netbox.tables")
+
+
+def _tables_getattr(name):
+    if name != "NetBoxTable":
+        raise AttributeError(name)
+    from tests.support.netbox_tables import NetBoxTable
+
+    return NetBoxTable
+
+
+netbox_tables.__getattr__ = _tables_getattr
+sys.modules["netbox.tables"] = netbox_tables
 
 class ChangelogMessageMixin(forms.Form):
     changelog_message = forms.CharField(required=False, max_length=200)

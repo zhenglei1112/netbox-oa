@@ -56,7 +56,7 @@ class MaterialMaintenanceTests(TestCase):
             services.remove_document(pk=first.pk, actor=self.actor)
 
     def test_sealed_replace_preserves_approval_and_delete_requires_reupload(self):
-        self.reach("report_seal")
+        self.reach("report_sealed_upload")
         approved = services.material_scan_sources(self.order, "report").first()
         sealed = self.upload("report", sealed=True)
         revised = self.replace(sealed)

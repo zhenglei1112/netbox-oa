@@ -36,7 +36,7 @@ class CurrentFlowTests(TestCase):
     def test_only_current_roles_nodes_and_flags_are_built(self):
         self.assertEqual(set(dict(ROLES)), {"reviewer", "department", "senior", "seal"})
         nodes = build_steps({}, 24)
-        self.assertEqual(sum(not node.get("return_only") for node in nodes), 17)
+        self.assertEqual(sum(not node.get("return_only") for node in nodes), 20)
         self.assertFalse(
             {"order_fill", "paid", "receipt", "issue", "invoice_check"}
             & {node["key"] for node in nodes}
@@ -49,6 +49,29 @@ class CurrentFlowTests(TestCase):
         self.assertEqual(self.policy.roles.count(), 4)
         self.start()
         self.assertEqual(self.current().name, "工单初审")
+
+    def test_seal_then_requester_upload_for_all_three_materials(self):
+        self.start()
+        for material, label in (("order", "服务工单"), ("report", "服务报告"),
+                                ("settlement", "服务结算单")):
+            while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_seal":
+                self.complete()
+            seal_task = self.current()
+            with self.assertRaises(ValidationError):
+                self.upload(material, "scan", sealed=True)
+            self.complete()
+            seal_task.refresh_from_db()
+            self.assertEqual(seal_task.status, "completed")
+            upload_task = self.current()
+            self.assertEqual(upload_task.name, f"上传用印后{label}")
+            self.assertEqual(upload_task.assigned_user_id, self.order.requester_id)
+            self.assertIsNone(upload_task.assigned_group_id)
+            with self.assertRaisesMessage(ValidationError, "用印扫描件"):
+                services.complete_task(pk=upload_task.pk, actor=self.actor)
+            stamped = self.upload(material, "scan", sealed=True)
+            self.assertTrue(stamped.is_sealed)
+            self.assertEqual(stamped.uploaded_task_id, upload_task.pk)
+            self.complete()
 
     def test_removed_payment_fields_are_absent_from_schema_forms_and_api(self):
         self.assertFalse(

@@ -166,6 +166,7 @@ class OrderingTests(TestCase):
                 "服务工单用印部门审核",
                 "服务工单用印公司审批",
                 "服务工单用印",
+                "上传用印后服务工单",
             ],
         )
         self.assertIsNone(self.current().assigned_user_id)
