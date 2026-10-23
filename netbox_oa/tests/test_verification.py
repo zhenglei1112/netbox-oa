@@ -98,7 +98,7 @@ class VerificationTests(TestCase):
         document.refresh_from_db()
         self.assertNotIn("priority", document.form_data)
 
-    def test_print_formats_snapshot_dates_in_chinese_without_changing_data(self):
+    def test_print_formats_snapshot_dates_without_changing_data(self):
         self.client.force_login(self.actor)
         document, _ = self.urls()
         document.form_data.update(
@@ -109,9 +109,10 @@ class VerificationTests(TestCase):
         response = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
-        self.assertContains(response, "2026年10月16日", count=2)
-        self.assertNotContains(response, "2026-10-16")
-        self.assertContains(response, "____年__月__日")
+        self.assertContains(response, "2026-10-16 10:32:00")
+        self.assertContains(response, "2026-10-16", count=2)
+        self.assertNotContains(response, "2026年10月16日")
+        self.assertContains(response, "____-__-__")
         document.refresh_from_db()
         self.assertEqual(document.form_data["signature_date"], "2026-10-16")
 

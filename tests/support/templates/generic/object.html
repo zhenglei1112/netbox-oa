@@ -1,0 +1,4 @@
+{% extends 'generic/_base.html' %}
+{# Standalone native detail shell. Production uses NetBox's full generic/object.html. #}
+{% block page-header %}<ol class="breadcrumb">{% block breadcrumbs %}{% endblock %}</ol>{{ block.super }}{% endblock %}
+{% block controls %}<div class="btn-list">{% block extra_controls %}{% endblock %}</div>{% endblock %}

@@ -1,10 +1,32 @@
+from datetime import date, datetime
+
 from django import template
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 
 from netbox_oa.choices import WorkflowStatus
 
 register = template.Library()
+
+
+@register.filter
+def oa_datetime(value):
+    """Display timestamps to seconds, preserving date-only snapshots as dates."""
+    if not value:
+        return value
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = parse_date(value) if len(value) == 10 else parse_datetime(value)
+        except ValueError:
+            return value
+    if isinstance(parsed, datetime):
+        if timezone.is_aware(parsed):
+            parsed = timezone.localtime(parsed)
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(parsed, date):
+        return parsed.strftime("%Y-%m-%d")
+    return value
 
 
 @register.filter
@@ -44,10 +66,4 @@ def status_label(value):
 def activity_time(value):
     if not value:
         return "—"
-    local = timezone.localtime(value)
-    today = timezone.localdate()
-    if local.date() == today:
-        return local.strftime("今天 %H:%M")
-    if local.year == today.year:
-        return local.strftime("%m-%d %H:%M")
-    return local.strftime("%Y-%m-%d %H:%M")
+    return oa_datetime(value)

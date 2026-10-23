@@ -2,7 +2,7 @@
 <details class="oa-material-upload"><summary>扫描件记录（{{ material.scans|length }}）</summary>
   {% for scan in material.scans %}
     <a href="{% url 'plugins:netbox_oa:maintenance_download' pk=scan.pk %}">扫描件 v{{ scan.version }} · {{ scan.get_state_display }}</a>
-    <small>{% if scan.source_document_id %}对应原件 v{{ scan.source_document.version }}{% else %}历史扫描件{% endif %} · {{ scan.created|date:'m-d H:i' }}</small>
+    <small>{% if scan.source_document_id %}对应原件 v{{ scan.source_document.version }}{% else %}历史扫描件{% endif %} · {{ scan.created|date:'Y-m-d H:i:s' }}</small>
   {% endfor %}
 </details>
 {% endif %}

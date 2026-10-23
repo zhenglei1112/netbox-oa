@@ -34,7 +34,7 @@
           <a class="oa-order-select" data-oa-select href="{{ row.url }}" {% if detail.order.pk == row.order.pk %}aria-current="true"{% endif %}>
             <div class="oa-order-title"><h2>{{ row.order.number }}{% if row.order.priority == 'high' %} <span class="badge bg-danger-subtle text-danger-emphasis ms-1 align-middle" title="高优先级" aria-label="高优先级">高</span>{% endif %}</h2><span class="oa-status {% if row.assigned_to_me and row.can_act %}oa-mine{% endif %}">{{ row.status_label }}</span></div>
             <dl class="oa-order-fields">
-              <dt>{% if row.order.status == 'draft' %}创建人：{% else %}发起人：{% endif %}</dt><dd>{{ row.requester_name }} - {{ row.initiated_at|date:'Y-m-d H:i'|default:'—' }}</dd>
+              <dt>{% if row.order.status == 'draft' %}创建人：{% else %}发起人：{% endif %}</dt><dd>{{ row.requester_name }} - {{ row.initiated_at|date:'Y-m-d H:i:s'|default:'—' }}</dd>
               <dt>服务单位：</dt><dd>{{ row.order.supplier|default:"—" }}</dd><dt>当前阶段：</dt><dd>{{ row.order.get_stage_display }} - {% if row.current %}{{ row.current.name }}{% else %}{{ row.order.get_status_display }}{% endif %}</dd>
             </dl>
           </a>
@@ -48,7 +48,7 @@
       <a class="btn btn-ghost-secondary oa-back" data-oa-back href="{{ list_url }}">← 返回列表</a>
       {% if detail %}
       <header class="oa-detail-header">
-        <div class="oa-detail-summary"><h2>{{ detail.order.number }}</h2><span class="oa-status">{{ detail.order.get_status_display }}</span><p>{{ detail.requester_name }}{% if detail.order.status == 'draft' %}创建{% else %}发起{% endif %} · {{ detail.initiated_at|date:'Y-m-d H:i'|default:'—' }}</p></div>
+        <div class="oa-detail-summary"><h2>{{ detail.order.number }}</h2><span class="oa-status">{{ detail.order.get_status_display }}</span><p>{{ detail.requester_name }}{% if detail.order.status == 'draft' %}创建{% else %}发起{% endif %} · {{ detail.initiated_at|date:'Y-m-d H:i:s'|default:'—' }}</p></div>
         <div class="d-flex align-items-center gap-2">
           <form class="m-0" method="post" data-oa-action action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='follow' %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"><button class="btn {% if detail.following %}btn-warning{% else %}btn-ghost-secondary{% endif %}" type="submit" title="{% if detail.following %}取消关注{% else %}关注工单{% endif %}" aria-label="{% if detail.following %}取消关注{% else %}关注工单{% endif %}" aria-pressed="{% if detail.following %}true{% else %}false{% endif %}"><i class="mdi {% if detail.following %}mdi-star{% else %}mdi-star-outline{% endif %}" aria-hidden="true"></i></button></form>
           {% if request.user.is_superuser and detail.order.status == 'active' %}<a class="btn btn-ghost-danger" data-oa-open="terminate" href="{{ detail_url }}&amp;panel=terminate" title="终止工单" aria-label="终止工单"><i class="mdi mdi-stop-circle-outline" aria-hidden="true"></i></a>{% endif %}

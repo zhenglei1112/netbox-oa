@@ -7,3 +7,8 @@ are provided by `tests.support.form_helpers`.
 Production uses NetBox's installed templates; these fixtures are not packaged with
 the plugin. The standalone `base/layout.html` only provides the page blocks needed
 by the tests and does not reproduce NetBox's navigation or styling.
+
+The standalone object detail and list shells are deliberately minimal adapters.
+`maintenance_v3_fixture.py` instead loads the native object/detail/list templates
+and compiled styles from `NETBOX_SOURCE`, with isolated database and tag/view
+adapters. Neither harness replaces integration checks against a running NetBox.

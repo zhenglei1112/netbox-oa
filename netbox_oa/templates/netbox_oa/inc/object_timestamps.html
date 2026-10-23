@@ -1,0 +1,4 @@
+<div class="text-secondary fs-5">
+  创建时间：{{ object.created|date:'Y-m-d H:i:s'|default:'—' }}
+  {% if object.last_updated %}<span class="separator">&middot;</span> 更新时间：{{ object.last_updated|date:'Y-m-d H:i:s' }}{% endif %}
+</div>

@@ -35,13 +35,15 @@ class ContractOrderFlowView(ContractOrderMixin, LoginRequiredMixin, View):
     def get(self, request, contract_id, pk):
         order = self.get_order(request, pk, contract_id)
         inbox = InboxPresentation([order], request.user, MaintenanceTask.objects.none())
+        history = inbox.history(order, limit=50)
         return render(request, "netbox_oa/contract_order_flow.html", {
             "detail": {
                 "order": order,
                 "current": inbox.summary(order)["current"],
                 "approval_diagram": inbox.approval_diagram(order),
+                "approval_events": history["approval_events"],
             },
-            "history": inbox.history(order, limit=50),
+            "history": history,
         })
 
 

@@ -343,7 +343,7 @@ class InboxTests(TestCase):
         self.assertTrue(material["stage_upload_complete"])
         self.assertEqual(material["stage_upload_document"], document)
         self.assertContains(response, "本阶段已完成上传")
-        uploaded_at = timezone.localtime(document.created).strftime("%Y-%m-%d %H:%M")
+        uploaded_at = timezone.localtime(document.created).strftime("%Y-%m-%d %H:%M:%S")
         self.assertContains(response, f"最近上传：{uploaded_at}")
         self.assertContains(response, f" · v{document.version}")
         self.complete()

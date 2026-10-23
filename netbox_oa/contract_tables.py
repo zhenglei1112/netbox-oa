@@ -10,8 +10,8 @@ class ContractOrderTable(NetBoxTable):
     requester = tables.Column(verbose_name="发起人", linkify=False)
     status = tables.Column(verbose_name="状态")
     stage = tables.Column(verbose_name="当前阶段")
-    created = tables.DateColumn(
-        verbose_name="创建时间", format="Y-m-d", order_by=("created", "pk")
+    created = tables.DateTimeColumn(
+        verbose_name="创建时间", format="Y-m-d H:i:s", order_by=("created", "pk")
     )
     actions = tables.TemplateColumn(
         template_name="netbox_oa/contract_order_actions.html",

@@ -1,0 +1,78 @@
+{% extends 'generic/object.html' %}
+{% load static %}
+{% block subtitle %}{% include 'netbox_oa/inc/object_timestamps.html' %}{% endblock %}
+{% block breadcrumbs %}<li class="breadcrumb-item"><a href="{{ list_url }}">维护服务工单 v3</a></li>{% endblock %}
+{% block title %}{{ object.number }}{% endblock %}
+{% block extra_controls %}
+  <a class="btn btn-outline-secondary" href="{{ list_url }}">返回列表</a>
+  {% if editable %}<a class="btn btn-warning" href="{{ edit_url }}"><i class="mdi mdi-pencil" aria-hidden="true"></i> 编辑</a>{% endif %}
+  <form method="post" class="d-inline" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=object.pk operation='follow' %}">
+    {% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}">
+    <button class="btn {% if detail.following %}btn-warning{% else %}btn-outline-secondary{% endif %}" title="{% if detail.following %}取消关注{% else %}关注工单{% endif %}" aria-label="{% if detail.following %}取消关注{% else %}关注工单{% endif %}" aria-pressed="{% if detail.following %}true{% else %}false{% endif %}"><i class="mdi {% if detail.following %}mdi-star{% else %}mdi-star-outline{% endif %}" aria-hidden="true"></i></button>
+  </form>
+  {% if editable and object.status == 'draft' %}<button class="btn btn-outline-danger" type="submit" form="v3-withdraw"><i class="mdi mdi-close-circle-outline" aria-hidden="true"></i> 撤销草稿</button>{% endif %}
+  {% if request.user.is_superuser and detail.can_change and object.status == 'active' %}<a class="btn btn-outline-danger" href="#v3-terminate" title="终止工单" aria-label="终止工单"><i class="mdi mdi-stop-circle-outline" aria-hidden="true"></i></a>{% endif %}
+{% endblock %}
+{% block tabs %}
+  <ul class="nav nav-tabs">
+    <li class="nav-item"><a class="nav-link {% if section == 'detail' %}active{% endif %}" href="?{{ list_query }}&amp;section=detail">工单详情</a></li>
+    <li class="nav-item"><a class="nav-link {% if section == 'materials' %}active{% endif %}" href="?{{ list_query }}&amp;section=materials">材料</a></li>
+    <li class="nav-item"><a class="nav-link {% if section == 'history' %}active{% endif %}" href="?{{ list_query }}&amp;section=history">审批记录</a></li>
+  </ul>
+{% endblock %}
+{% block content %}
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-v3.css' %}">
+  <script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
+  <script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}" defer></script>
+  <script src="{% static 'netbox_oa/maintenance-v3.js' %}" defer></script>
+  {% if action_error %}<div class="alert alert-danger" role="alert">{{ action_error }}{% if not detail.can_act and action_form.is_bound %}<p>你填写的意见：{{ action_form.comment.value|default:'（未填写）' }}</p>{% endif %}</div>{% endif %}
+  {% if section == 'materials' %}
+    {% include 'netbox_oa/maintenance/v3/materials.html' %}
+  {% elif section == 'history' %}
+    {% include 'netbox_oa/maintenance/v3/history.html' %}
+  {% else %}
+  <div class="row">
+    <div class="col col-12 col-lg-6">
+      <div class="card mb-3"><h2 class="card-header">维护服务工单</h2><table class="table table-hover attr-table">
+        <tr><th scope="row">工单编号</th><td>{{ object.number }}</td></tr>
+        <tr><th scope="row">状态 / 阶段</th><td>{{ object.get_status_display }} / {{ object.get_stage_display }}</td></tr>
+        <tr><th scope="row">发起人</th><td>{{ object.requester }}</td></tr>
+        <tr><th scope="row">线路主管</th><td>{{ object.owner }}</td></tr>
+        <tr><th scope="row">服务项目</th><td>{{ object.get_service_type_display }}</td></tr>
+        <tr><th scope="row">优先级</th><td>{{ object.get_priority_display }}</td></tr>
+        <tr><th scope="row">服务单位</th><td>{{ object.supplier }}</td></tr>
+        <tr><th scope="row">合同编号</th><td>{{ object.contract_number }}</td></tr>
+        <tr><th scope="row">服务区域</th><td>{{ object.service_region }}</td></tr>
+        <tr><th scope="row">服务位置</th><td>{{ object.service_location }}</td></tr>
+        <tr><th scope="row">联系电话</th><td>{{ object.contact_phone|default:'—' }}</td></tr>
+        <tr><th scope="row">服务要求</th><td>{{ object.requirements|linebreaksbr }}</td></tr>
+      </table></div>
+      {% if detail.links %}<div class="card mb-3"><h2 class="card-header">关联对象</h2><div class="card-body">{% for link in detail.links %}<p>{{ link }}</p>{% endfor %}</div></div>{% endif %}
+    </div>
+    <div class="col col-12 col-lg-6">
+      <div class="card mb-3"><h2 class="card-header">{% if detail.current %}{{ detail.current.name }}{% else %}{{ object.get_status_display }}{% endif %}</h2><div class="card-body">
+        {% if detail.current %}<p>办理人 / 组：{{ detail.waiting_for }}</p><p>到期时间：{{ detail.current.deadline|date:'Y-m-d H:i:s' }}{% if detail.deadline_state == 'overdue' %} <span class="text-danger">已超时</span>{% elif detail.deadline_state == 'warning' %} <span class="text-warning">即将超时</span>{% endif %}</p>{% endif %}
+        {% if guide.steps %}<ol>{% for step in guide.steps %}<li>{{ step }}</li>{% endfor %}</ol>{% endif %}
+        {% if guide.pending_uploads %}<div class="alert alert-warning">待补齐材料：{{ guide.pending_uploads|join:'、' }}</div>{% endif %}
+        {% include 'netbox_oa/maintenance/v3/actions.html' %}
+      </div></div>
+      <div class="card mb-3"><h2 class="card-header">当前材料</h2><div class="card-body">
+        {% for material in detail.materials %}{% if material.required_now %}<div class="mb-3"><strong>{{ material.name }}</strong>
+          {% if material.stage_upload_required %}<span class="badge {% if material.stage_upload_complete %}text-bg-success{% else %}text-bg-warning{% endif %}">{% if material.stage_upload_complete %}已补齐{% else %}待上传{% endif %}</span>{% endif %}
+          {% if material.can_upload %}{% include 'netbox_oa/maintenance/upload_button.html' with order_id=object.pk material_key=material.key %}{% endif %}
+        </div>{% endif %}{% endfor %}
+        <a class="btn btn-outline-primary" href="?{{ list_query }}&amp;section=materials">查看材料与历史版本</a>
+      </div></div>
+    </div>
+  </div>
+  {% endif %}
+  {% if editable and object.status == 'draft' %}<form id="v3-withdraw" method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=object.pk operation='withdraw' %}" data-v3-confirm="确认撤销该草稿？">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"></form>{% endif %}
+  {% if request.user.is_superuser and detail.can_change and object.status == 'active' %}
+    <details id="v3-terminate" class="card mb-3"><summary class="card-header">终止工单</summary><div class="card-body"><form method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=object.pk operation='terminate' %}" data-v3-confirm="确认终止该工单？">
+      {% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}">
+      <label class="form-label" for="terminate-comment">终止原因</label><textarea class="form-control mb-3" id="terminate-comment" name="comment" required maxlength="4000">{{ comment_value }}</textarea>
+      <button class="btn btn-danger">终止工单</button>
+    </form></div></details>
+  {% endif %}
+{% endblock %}

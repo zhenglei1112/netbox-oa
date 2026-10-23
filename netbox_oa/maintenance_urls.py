@@ -2,9 +2,31 @@ from django.urls import path
 
 from . import contract_views
 from . import maintenance_signature_views as signatures
+from . import maintenance_v3 as v3
 from . import maintenance_views as views
 
 urlpatterns = [
+    path("maintenance/v3/", v3.MaintenanceV3ListView.as_view(), name="maintenance_v3_list"),
+    path(
+        "maintenance/v3/orders/add/", v3.MaintenanceV3EditView.as_view(),
+        name="maintenance_v3_add",
+    ),
+    path(
+        "maintenance/v3/orders/<int:pk>/", v3.MaintenanceV3DetailView.as_view(),
+        name="maintenance_v3_detail",
+    ),
+    path(
+        "maintenance/v3/orders/<int:pk>/edit/", v3.MaintenanceV3EditView.as_view(),
+        name="maintenance_v3_edit",
+    ),
+    path(
+        "maintenance/v3/orders/<int:pk>/forms/<str:material>/",
+        v3.MaintenanceV3CompanyFormView.as_view(), name="maintenance_v3_company_form",
+    ),
+    path(
+        "maintenance/v3/orders/<int:pk>/signature/",
+        v3.MaintenanceV3DraftSignatureView.as_view(), name="maintenance_v3_draft_signature",
+    ),
     path(
         "contracts/<int:contract_id>/orders/<int:pk>/flow/",
         contract_views.ContractOrderFlowView.as_view(),

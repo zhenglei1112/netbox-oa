@@ -14,14 +14,14 @@
       <text class="oa-flow-terminal" x="{{ diagram.start_x }}" y="110">开始办理</text>
       {% for node in diagram.nodes %}
       <g class="oa-flow-node {{ node.kind }} oa-history-{{ node.state }}">
-        <title>{{ node.name }}{% for attempt in node.attempts %}&#10;{{ attempt.name }} · {{ attempt.actor }} · {{ attempt.status }}{% if attempt.time %} · {{ attempt.time|date:'Y年n月j日 H:i' }}{% endif %}{% if attempt.comment %} · {{ attempt.comment }}{% endif %}{% endfor %}</title>
+        <title>{{ node.name }}{% for attempt in node.attempts %}&#10;{{ attempt.name }} · {{ attempt.actor }} · {{ attempt.status }}{% if attempt.time %} · {{ attempt.time|date:'Y-m-d H:i:s' }}{% endif %}{% if attempt.comment %} · {{ attempt.comment }}{% endif %}{% endfor %}</title>
         <rect x="{{ node.x }}" y="{{ node.y }}" width="260" height="{{ node.height }}" rx="10"/>
         <text class="oa-flow-number" x="{{ node.number_x }}" y="{{ node.number_y }}">{{ node.position }}</text>
         <text class="oa-approval-state" x="{{ node.x|add:'248' }}" y="{{ node.number_y }}">{{ node.state_label }}</text>
         {% for line in node.label_lines %}<text class="oa-flow-name" x="{{ node.cx }}" y="{{ line.y }}">{{ line.text }}</text>{% endfor %}
         {% for attempt in node.attempts %}
         <text class="oa-flow-role" x="{{ node.cx }}" y="{{ attempt.actor_y }}">{{ attempt.actor }}{% if node.attempts|length > 1 %} · {{ attempt.status }}{% endif %}</text>
-        {% if attempt.time %}<text class="oa-flow-role" x="{{ node.cx }}" y="{{ attempt.time_y }}">{{ attempt.time|date:'Y年n月j日 H:i' }}</text>{% endif %}
+        {% if attempt.time %}<text class="oa-flow-role" x="{{ node.cx }}" y="{{ attempt.time_y }}">{{ attempt.time|date:'Y-m-d H:i:s' }}</text>{% endif %}
         {% empty %}{% if node.return_only %}<text class="oa-flow-role" x="{{ node.cx }}" y="{{ node.empty_y }}">仅退回时进入</text>{% endif %}{% endfor %}
       </g>
       {% endfor %}

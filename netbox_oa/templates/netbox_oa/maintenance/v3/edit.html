@@ -1,0 +1,13 @@
+{% extends 'generic/object_edit.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block form %}
+  {{ form.non_field_errors }}
+  {% include 'netbox_oa/maintenance/contract_fields.html' %}
+  <input type="hidden" name="return_query" value="{{ return_query }}">
+  {% if expected_document_id %}<input type="hidden" name="expected_document_id" value="{{ expected_document_id }}">{% endif %}
+  {% include 'htmx/form.html' %}
+{% endblock %}
+{% block buttons %}
+  <a href="{{ return_url }}" class="btn btn-outline-secondary">取消</a>
+  <button type="submit" class="btn btn-primary">保存</button>
+{% endblock %}

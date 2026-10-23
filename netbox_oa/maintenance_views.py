@@ -833,7 +833,10 @@ class MaintenanceOrderEditView(LoginRequiredMixin, View):
 def workbench_params(request):
     source = QueryDict(request.POST.get("return_query", ""))
     params = QueryDict(mutable=True)
-    for key in ("tab", "q", "stage", "node", "sort", "ui"):
+    for key in (
+        "tab", "q", "stage", "node", "sort", "ui", "scope", "status", "page", "per_page",
+        "tableconfig_id", "section", "history",
+    ):
         if key in source:
             params[key] = source[key]
     return params
@@ -841,6 +844,10 @@ def workbench_params(request):
 
 def workbench_redirect(request, order_id):
     params = workbench_params(request)
+    if params.get("ui") == "v3":
+        from .maintenance_v3 import detail_url
+
+        return redirect(detail_url(request, order_id))
     params["selected"] = order_id
     panel = request.POST.get("return_panel", "")
     if panel in {f"material-{key}" for key, _ in MATERIALS}:
@@ -853,6 +860,10 @@ def workbench_redirect(request, order_id):
 
 
 def workbench_error(request, order_id, error, form=None, status=400):
+    if workbench_params(request).get("ui") == "v3":
+        from .maintenance_v3 import error_response
+
+        return error_response(request, order_id, error, form, status)
     request.GET = workbench_params(request)
     if request.POST.get("return_panel") == "routing":
         request.GET["panel"] = "routing"
@@ -880,14 +891,28 @@ class MaintenanceOrderActionView(LoginRequiredMixin, View):
             handlers[operation](pk=pk, actor=request.user, **kwargs)
         except ValidationError as exc:
             return workbench_error(request, pk, "; ".join(exc.messages))
+        except PermissionDenied:
+            if workbench_params(request).get("ui") != "v3":
+                raise
+            return workbench_error(
+                request, pk, "当前工单的办理权限已变化，请查看最新状态。", status=403,
+            )
         return workbench_redirect(request, pk)
 
 
 class MaintenanceTaskActionView(LoginRequiredMixin, View):
     def post(self, request, pk, operation):
-        _allowed(MaintenanceTask, request.user, "change", pk)
         task = get_object_or_404(MaintenanceTask, pk=pk)
         form = MaintenanceActionForm(request.POST, order=task.order, actor=request.user)
+        try:
+            _allowed(MaintenanceTask, request.user, "change", pk)
+        except PermissionDenied:
+            if workbench_params(request).get("ui") != "v3":
+                raise
+            return workbench_error(
+                request, task.order_id, "当前任务的办理权限已变化，请查看最新状态。",
+                form, status=403,
+            )
         if form.is_valid():
             data = form.cleaned_data
             handlers = {
@@ -1212,10 +1237,20 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
                             "image" if suffix in {".png", ".jpg", ".jpeg"} else "download"
                         ),
                     })
+        review_return_url = order.get_absolute_url()
+        if request.GET.get("ui") == "v3":
+            from .maintenance_v3 import detail_url
+
+            review_return_url = detail_url(request, order.pk)
+        review_query = request.GET.copy()
+        for key in ("material", "document", "embed"):
+            review_query.pop(key, None)
         return render(request, "netbox_oa/maintenance/review.html", {
             "order": order, "groups": groups, "selected_group": group, "selected": selected,
             "review_items": review_items,
             "read_only": self.read_only,
+            "review_return_url": review_return_url,
+            "review_query": review_query.urlencode() if request.GET.get("ui") == "v3" else "",
         })
 
 
@@ -1248,6 +1283,15 @@ class MaintenanceDownloadView(LoginRequiredMixin, View):
         )
         _allowed(MaintenanceOrder, request.user, "view", document.order_id)
         if document.kind == "form":
+            if request.GET.get("ui") == "v3":
+                from .maintenance_v3 import params
+
+                query = params(request)
+                query["ui"] = "v3"
+                return redirect(
+                    reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
+                    + f"?{query.urlencode()}"
+                )
             return redirect("plugins:netbox_oa:maintenance_print", pk=document.pk)
         if not document.file:
             raise Http404("附件文件不存在。")
@@ -1370,14 +1414,20 @@ class MaintenancePrintView(LoginRequiredMixin, View):
                         signatures[
                             "applicant" if node["key"] == "order_correction" else node["key"]
                         ] = task.evidence.get("signature", {})
+        print_return_url = document.order.get_absolute_url()
+        if request.GET.get("ui") == "v3":
+            from .maintenance_v3 import detail_url
+
+            print_return_url = detail_url(request, document.order_id)
         response = render(
             request,
             "netbox_oa/maintenance/print.html",
             {
                 "document": document,
+                "print_return_url": print_return_url,
                 **codes,
                 "data": data,
-                "requested_at": data.get("requested_at", "")[:16].replace("T", " "),
+                "requested_at": data.get("requested_at", ""),
                 "service_items": SERVICE_ITEMS,
                 "priority_label": dict(MaintenanceOrder._meta.get_field("priority").choices).get(
                     data.get("priority", document.order.priority), "—"

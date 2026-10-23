@@ -3,11 +3,11 @@
       {% if material.stage_upload_required %}
       <div class="oa-stage-upload {% if material.stage_upload_complete %}oa-stage-upload-complete{% else %}oa-stage-upload-pending{% endif %}" role="status" aria-live="polite">
         <strong>{% if material.stage_upload_complete %}<i class="mdi mdi-check-circle-outline" aria-hidden="true"></i> {% if material.stage_materials_adjusted %}本阶段材料已调整 · 保留 {{ material.stage_upload_count }} 份{% else %}本阶段已完成上传{% endif %}{% elif material.stage_upload_document %}本阶段已上传 · 用印扫描件 {{ material.stage_upload_count }}/{{ material.stage_upload_total }} 份{% else %}本阶段待上传{% endif %}</strong>
-        {% if material.stage_upload_document %}<span>最近上传：{{ material.stage_upload_document.created|date:'Y-m-d H:i' }} · v{{ material.stage_upload_document.version }}</span>{% endif %}
+        {% if material.stage_upload_document %}<span>最近上传：{{ material.stage_upload_document.created|date:'Y-m-d H:i:s' }} · v{{ material.stage_upload_document.version }}</span>{% endif %}
         {% if material.stage_upload_document and material.missing_upload_sources %}<span>仍需上传用印件：{% for source in material.missing_upload_sources %}{{ source.original_name }}（原件 v{{ source.version }}）{% if not forloop.last %}、{% endif %}{% endfor %}</span>{% endif %}
       </div>
       {% endif %}
-      <div class="oa-document-footer"><span>{% if not material.stage_upload_required %}{% if material.current_file %}{{ material.current_file.created|date:'m-d H:i' }}{% else %}暂无文件{% endif %}{% endif %}</span><div class="btn-list mb-0 gap-1">
+      <div class="oa-document-footer"><span>{% if not material.stage_upload_required %}{% if material.current_file %}{{ material.current_file.created|date:'Y-m-d H:i:s' }}{% else %}暂无文件{% endif %}{% endif %}</span><div class="btn-list mb-0 gap-1">
         {% include 'netbox_oa/maintenance/inbox_material_operations.html' %}
       </div></div>
     </article>

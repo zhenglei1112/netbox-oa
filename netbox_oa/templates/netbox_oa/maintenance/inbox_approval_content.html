@@ -1,0 +1,5 @@
+<header class="oa-panel-header oa-approval-header"><div class="oa-approval-heading"><h2 id="oa-activity-title">审批经过</h2><span class="oa-eyebrow">{{ detail.order.number }}</span></div>{% if detail.approval_diagram %}<div class="oa-flow-legend" aria-label="审批经过图例"><span class="oa-history-completed">已完成</span><span class="oa-history-current">当前环节</span><span class="oa-history-returned">已退回</span><span>未办理</span><span>实线：顺序办理</span><span class="oa-flow-return-label">虚线：退回补正</span></div>{% endif %}{% if not approval_embedded %}<a data-oa-close class="btn btn-ghost-secondary oa-close" href="{{ detail_url }}" aria-label="关闭审批经过">×</a>{% endif %}</header>
+<div class="oa-panel-body oa-audit-dialog-scroll">
+  {% include 'netbox_oa/maintenance/inbox_approval_diagram.html' %}
+  <section class="oa-approval-records"><h3>详细办理记录与意见</h3>{% include 'netbox_oa/maintenance/inbox_activity_timeline.html' with activity_records=detail.approval_events %}</section>
+</div>

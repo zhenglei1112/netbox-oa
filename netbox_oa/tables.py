@@ -21,7 +21,7 @@ class WorkflowInstanceTable(NetBoxTable):
     definition = tables.Column(linkify=True, verbose_name="流程定义")
     requester = tables.Column(verbose_name="申请人")
     status = tables.Column(verbose_name="流程状态")
-    created = tables.DateTimeColumn(verbose_name="创建时间")
+    created = tables.DateTimeColumn(verbose_name="创建时间", format="Y-m-d H:i:s")
 
     class Meta(NetBoxTable.Meta):
         model = WorkflowInstance
@@ -34,7 +34,7 @@ class WorkflowTaskTable(NetBoxTable):
     instance = tables.Column(linkify=True, verbose_name="所属流程")
     assigned_group = tables.Column(verbose_name="审批组")
     status = tables.Column(verbose_name="任务状态")
-    decided_at = tables.DateTimeColumn(verbose_name="处理时间")
+    decided_at = tables.DateTimeColumn(verbose_name="处理时间", format="Y-m-d H:i:s")
 
     class Meta(NetBoxTable.Meta):
         model = WorkflowTask

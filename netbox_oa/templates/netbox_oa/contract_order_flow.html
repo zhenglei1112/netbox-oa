@@ -7,19 +7,14 @@
   <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
   <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
   <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/contract-orders.css' %}">
 </head>
 <body data-oa-contract-ready>
-<main class="p-3">
-  <h1 class="h3">{{ detail.order.number }} · 办理流程</h1>
-  <p>{{ detail.order.get_status_display }} · {{ detail.order.get_stage_display }}{% if detail.current %} · {{ detail.current.name }}{% endif %}</p>
-  {% include 'netbox_oa/maintenance/inbox_approval_diagram.html' %}
-  <h2 class="h4 mt-3">办理经过</h2>
-  <div class="table-responsive">
-    <table class="table table-hover"><thead><tr><th>时间</th><th>办理人</th><th>操作</th><th>办理说明</th></tr></thead>
-      <tbody>{% for item in history.approval_events %}<tr><td>{{ item.event.created|date:'Y-m-d H:i' }}</td><td>{{ item.actor_name }}</td><td>{{ item.action_label }}</td><td>{{ item.description }}{% if item.record_comment %}<br>{{ item.record_comment|linebreaksbr }}{% endif %}</td></tr>{% empty %}<tr><td colspan="4">暂无可查看的办理记录</td></tr>{% endfor %}</tbody>
-    </table>
-  </div>
+<main class="oa-workbench oa-inbox oa-industrial oa-approval-panel oa-contract-flow">
+  {% include 'netbox_oa/maintenance/inbox_approval_content.html' with approval_embedded=True %}
 </main>
 </body>
 </html>

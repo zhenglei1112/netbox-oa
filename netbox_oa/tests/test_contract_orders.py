@@ -53,6 +53,12 @@ class ContractOrderTests(TestCase):
         self.client.force_login(self.actor)
         response = self.client.get(self.url("flow"))
         self.assertContains(response, "完整审批经过")
+        self.assertTemplateUsed(response, "netbox_oa/maintenance/inbox_approval_content.html")
+        self.assertTemplateUsed(response, "netbox_oa/maintenance/inbox_activity_timeline.html")
+        self.assertContains(response, "详细办理记录与意见")
+        self.assertContains(response, 'aria-label="审批经过图例"')
+        self.assertNotContains(response, '<table')
+        self.assertNotContains(response, 'aria-label="关闭审批经过"')
         self.assertTrue(response.context["history"]["approval_events"])
         self.assertNotContains(response, '<form')
         self.assertNotContains(response, 'data-oa-upload')
@@ -150,7 +156,9 @@ class ContractOrderTests(TestCase):
         self.assertIn("查看材料", html)
         self.assertIn('aria-label="服务工单"', html)
         self.assertEqual(table.columns["actions"].header, "")
-        self.assertRegex(table.rows[0].get_cell("created"), r"^\d{4}-\d{2}-\d{2}$")
+        self.assertRegex(
+            table.rows[0].get_cell("created"), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
+        )
         self.assertIn('class="btn btn-outline-primary"', html)
         self.assertIn('class="btn btn-outline-info"', html)
         self.assertNotIn('type="checkbox"', html)

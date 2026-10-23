@@ -39,7 +39,7 @@ const python = process.env.PYTHON || path.resolve(
         Node.DOCUMENT_POSITION_FOLLOWING)));
     assert.equal(await page.locator('#oa-contract-orders thead th').last().textContent(), '');
     const firstRow = page.locator('#oa-contract-orders tbody tr').first();
-    assert.match(await firstRow.locator('td').nth(5).innerText(), /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(await firstRow.locator('td').nth(5).innerText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     const actionButtons = firstRow.locator('[data-oa-contract-open]');
     assert.equal(await actionButtons.first().innerText(), '');
     assert.match(await actionButtons.first().getAttribute('class'), /btn-outline-primary/);
@@ -63,10 +63,17 @@ const python = process.env.PYTHON || path.resolve(
     const dialog = page.locator('#oa-contract-dialog');
     const frame = page.frameLocator('#oa-contract-dialog iframe');
     await frame.locator('[data-oa-contract-ready]').waitFor();
-    await frame.getByRole('heading', {name: '办理经过'}).waitFor();
+    await frame.getByRole('heading', {name: '详细办理记录与意见'}).waitFor();
+    assert.equal(await frame.locator('.oa-record-timeline').count(), 1);
+    assert.equal(await frame.locator('table').count(), 0);
+    assert.equal(await frame.locator('.oa-contract-flow').evaluate(node =>
+      getComputedStyle(node).height === `${window.innerHeight}px`), true);
+    await page.screenshot({path: path.join(root, 'flow-desktop.png')});
+    await frame.locator('.oa-record-timeline').evaluate(node => node.scrollIntoView({block: 'end'}));
+    await page.screenshot({path: path.join(root, 'flow-details.png')});
     assert.equal(await frame.locator('form').count(), 0);
     assert.equal(await dialog.evaluate(node => node.matches(':modal')), true);
-    await frame.getByRole('heading', {name: '办理经过'}).click();
+    await frame.getByRole('heading', {name: '详细办理记录与意见'}).click();
     await page.keyboard.press('Escape');
     await dialog.waitFor({state: 'hidden'});
     assert.equal(await flowButton.evaluate(node => node === document.activeElement), true);
@@ -91,7 +98,7 @@ const python = process.env.PYTHON || path.resolve(
     await dialog.waitFor({state: 'hidden'});
     await page.setViewportSize({width: 390, height: 844});
     await flowButton.click();
-    await frame.getByRole('heading', {name: '办理经过'}).waitFor();
+    await frame.getByRole('heading', {name: '详细办理记录与意见'}).waitFor();
     const bounds = await dialog.boundingBox();
     assert.ok(bounds.width <= 390 && bounds.height <= 844);
     await page.screenshot({path: path.join(root, 'flow-mobile.png')});

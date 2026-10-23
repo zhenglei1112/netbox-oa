@@ -13,3 +13,23 @@
 #oa-contract-dialog::backdrop { background: rgb(0 0 0 / 50%); }
 #oa-contract-dialog iframe { flex: 1; width: 100%; min-height: 0; border: 0; }
 #oa-contract-dialog [hidden] { display: none; }
+
+/* Use the workbench's detailed approval UI with spacing suited to its iframe. */
+.oa-contract-flow {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: none;
+}
+.oa-contract-flow .oa-approval-header { padding: 12px 16px; gap: 16px; flex-wrap: wrap; }
+.oa-contract-flow .oa-approval-heading h2 { font-size: 1.05rem; }
+.oa-contract-flow .oa-flow-legend { gap: 12px; font-size: .75rem; }
+.oa-contract-flow .oa-panel-body { padding: 8px 12px; }
+.oa-contract-flow .oa-approval-flow .oa-flow-svg {
+  width: min(100%, 1100px);
+  min-width: 900px;
+  margin-inline: auto;
+}
+.oa-contract-flow .oa-approval-records { margin: 10px 4px; }
+.oa-contract-flow .oa-approval-records > h3 { padding: 8px 0; }
+.oa-contract-flow .oa-record-timeline { --oa-record-node-width: 190px; }

@@ -6,7 +6,7 @@
       <div class="oa-record-title"><strong>{% if item.event.task %}{{ item.event.task.name }}{% else %}{{ item.short_label }}{% endif %}</strong>{% if item.event.task and item.short_label != item.event.task.name %}<span class="oa-record-result">{{ item.short_label }}</span>{% endif %}</div>
     </div>
     <div class="oa-record-detail">
-      <div class="oa-record-person"><span>{{ item.actor_name }}</span><time datetime="{{ item.event.created|date:'c' }}" title="{{ item.event.created|date:'Y-m-d H:i' }}">{{ item.event.created|date:'m-d H:i' }}</time></div>
+      <div class="oa-record-person"><span>{{ item.actor_name }}</span><time datetime="{{ item.event.created|date:'c' }}" title="{{ item.event.created|date:'Y-m-d H:i:s' }}">{{ item.event.created|date:'Y-m-d H:i:s' }}</time></div>
       {% if item.record_comment %}<p>{{ item.record_comment|linebreaksbr }}</p>{% endif %}
       {% if item.record_context %}<p class="oa-record-description">{{ item.record_context }}</p>{% endif %}
       {% if item.event.details.external_reference %}<p class="oa-record-reference">外部单号：{{ item.event.details.external_reference }}</p>{% endif %}

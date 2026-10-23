@@ -1,0 +1,29 @@
+{% for material in detail.materials %}
+<div class="card mb-3" id="material-{{ material.key }}">
+  <h2 class="card-header">{{ material.name }}{% if material.required_now %}<span class="badge text-bg-primary ms-2">当前节点</span>{% endif %}</h2>
+  <div class="card-body"><div class="btn-list">
+    {% if material.key == 'order' and editable %}<a class="btn btn-warning" href="{{ edit_url }}">编辑表单</a>
+    {% elif material.can_fill %}<a class="btn btn-warning" href="{% url 'plugins:netbox_oa:maintenance_v3_company_form' pk=object.pk material=material.key %}?{{ list_query }}&amp;section=materials">编辑表单</a>{% endif %}
+    {% if material.can_upload %}{% include 'netbox_oa/maintenance/upload_button.html' with order_id=object.pk material_key=material.key %}{% endif %}
+    {% if material.form_document %}<a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_print' pk=material.form_document.pk %}?ui=v3&amp;{{ list_query }}&amp;section=materials" target="_blank" rel="noopener">查看 / 打印表单</a>{% endif %}
+    <a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_review' pk=object.pk %}?material={{ material.key }}&amp;ui=v3&amp;{{ list_query }}" target="_blank" rel="noopener">审阅材料</a>
+  </div></div>
+  {% if material.stage_upload_required %}<div class="card-body pt-0">本节点上传：{% if material.stage_upload_complete %}已补齐{% else %}待补齐{% endif %}（{{ material.stage_upload_count }} 份）</div>{% endif %}
+  {% if material.maintainable %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>当前可维护材料</th><th>原文件名</th><th>操作</th></tr></thead><tbody>
+    {% for document in material.maintainable %}<tr><td>{{ document.short_name }}</td><td>{{ document.original_name }}</td><td><div class="btn-list">
+      <a class="btn btn-outline-primary" data-oa-upload href="{% url 'plugins:netbox_oa:maintenance_material_upload' pk=object.pk material=material.key %}?replace={{ document.pk }}" title="上传覆盖" aria-label="上传覆盖 {{ document.short_name }}"><i class="mdi mdi-upload" aria-hidden="true"></i></a>
+      {% if document.v3_can_remove %}<button class="btn btn-outline-danger" type="button" data-v3-remove="{% url 'plugins:netbox_oa:maintenance_material_remove' pk=document.pk %}" title="删除材料" aria-label="删除 {{ document.short_name }}"><i class="mdi mdi-delete" aria-hidden="true"></i></button>{% endif %}
+    </div></td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+  <details class="card-body" open><summary>文件与历史版本（{{ material.versions|length }}）</summary>
+    <div class="table-responsive"><table class="table table-hover"><thead><tr><th>材料 / 份号</th><th>版本</th><th>类型</th><th>关联审批件</th><th>原文件名</th><th>上传时间</th><th>操作</th></tr></thead><tbody>
+      {% for document in material.versions %}<tr>
+        <td>{{ document.short_name }}{% if document.removed_at %} <span class="badge text-bg-secondary">已删除</span>{% endif %}</td><td>v{{ document.version }}</td><td>{% if document.kind == 'form' %}填写表单{% elif document.is_sealed %}用印后{% else %}审批件 / 附件{% endif %}</td>
+        <td>{% if document.source_document_id %}{{ document.source_document.short_name }} · v{{ document.source_document.version }}{% else %}—{% endif %}</td><td>{{ document.original_name }}</td><td>{{ document.created|date:'Y-m-d H:i:s' }}</td>
+        <td>{% if document.kind == 'form' %}<a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_print' pk=document.pk %}?ui=v3&amp;{{ list_query }}&amp;section=materials" target="_blank" rel="noopener">查看 / 打印</a>{% elif document.file %}<div class="btn-list"><a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_preview' pk=document.pk %}" target="_blank" rel="noopener">查看</a><a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:maintenance_download' pk=document.pk %}">下载</a></div>{% endif %}</td>
+      </tr>{% empty %}<tr><td colspan="7" class="text-muted">暂无材料。</td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>
+</div>
+{% endfor %}
+<form hidden>{% csrf_token %}</form>

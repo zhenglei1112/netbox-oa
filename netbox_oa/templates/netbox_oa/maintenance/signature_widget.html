@@ -1,5 +1,5 @@
 <div class="oa-signature-widget" data-signature-widget
-     data-create-url="{% if signing_form %}{{ signature_save_url }}{% else %}{% url 'plugins:netbox_oa:maintenance_signature_create' pk=detail.current.pk %}{% endif %}"
+     data-create-url="{% if signature_create_url %}{{ signature_create_url }}{% elif signing_form %}{{ signature_save_url }}{% else %}{% url 'plugins:netbox_oa:maintenance_signature_create' pk=detail.current.pk %}{% endif %}"
      {% if signing_form %}data-save-form="true"{% endif %}
      data-signed="{% if detail.mobile_signature.uploaded_at %}1{% else %}0{% endif %}"
      {% if detail.mobile_signature %}data-action-url="{% url 'plugins:netbox_oa:maintenance_signature' pk=detail.mobile_signature.pk %}"{% endif %}>

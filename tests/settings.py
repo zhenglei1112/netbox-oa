@@ -98,6 +98,20 @@ def _tables_getattr(name):
 netbox_tables.__getattr__ = _tables_getattr
 sys.modules["netbox.tables"] = netbox_tables
 
+netbox_filtersets = types.ModuleType("netbox.filtersets")
+
+
+def _filtersets_getattr(name):
+    if name != "BaseFilterSet":
+        raise AttributeError(name)
+    import django_filters
+
+    return django_filters.FilterSet
+
+
+netbox_filtersets.__getattr__ = _filtersets_getattr
+sys.modules["netbox.filtersets"] = netbox_filtersets
+
 class ChangelogMessageMixin(forms.Form):
     changelog_message = forms.CharField(required=False, max_length=200)
 
@@ -107,10 +121,31 @@ class ChangelogMessageMixin(forms.Form):
 
 
 netbox_forms = types.ModuleType("netbox.forms")
+class NetBoxModelFilterSetForm(forms.Form):
+    q = forms.CharField(required=False, label="搜索")
+
+
+netbox_forms.NetBoxModelFilterSetForm = NetBoxModelFilterSetForm
 netbox_form_mixins = types.ModuleType("netbox.forms.mixins")
 netbox_form_mixins.ChangelogMessageMixin = ChangelogMessageMixin
 sys.modules["netbox.forms"] = netbox_forms
 sys.modules["netbox.forms.mixins"] = netbox_form_mixins
+
+# Page behavior is exercised with real ORM, django-filter and django-tables2.
+# Production permission integration and table configuration still require NetBox.
+netbox_views = types.ModuleType("netbox.views")
+
+
+def _views_getattr(name):
+    if name != "generic":
+        raise AttributeError(name)
+    from tests.support import netbox_views as generic_views
+
+    return generic_views
+
+
+netbox_views.__getattr__ = _views_getattr
+sys.modules["netbox.views"] = netbox_views
 
 # Create the base model lazily: model classes require Django's app registry.
 base = types.ModuleType("netbox.models")
