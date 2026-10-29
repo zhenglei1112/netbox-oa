@@ -6,6 +6,11 @@ from . import maintenance_v3 as v3
 from . import maintenance_views as views
 
 urlpatterns = [
+    path(
+        "contracts/<int:contract_id>/orders/<int:pk>/payments/",
+        contract_views.ContractOrderPaymentsView.as_view(),
+        name="contract_order_payments",
+    ),
     path("maintenance/v3/", v3.MaintenanceV3ListView.as_view(), name="maintenance_v3_list"),
     path(
         "maintenance/v3/orders/add/", v3.MaintenanceV3EditView.as_view(),

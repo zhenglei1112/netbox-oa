@@ -18,7 +18,7 @@
 .oa-inbox .oa-heading h1{font-size:1.5rem}.oa-inbox .oa-heading p{font-size:.85rem}
 .oa-inbox .oa-stats{display:flex;flex-wrap:wrap;gap:10px 26px;padding:12px 0;border-block:1px solid var(--oa-border);margin-bottom:16px;font-size:.85rem;color:var(--oa-muted)}
 .oa-inbox .oa-stats strong{font-size:1rem;margin-left:8px;color:var(--tblr-body-color,var(--bs-body-color,#263445))}
-.oa-inbox .oa-columns{grid-template-columns:minmax(340px,.8fr) minmax(460px,1.2fr);gap:18px;height:calc(100dvh - 240px);min-height:480px;align-items:stretch}
+.oa-inbox .oa-columns{grid-template-columns:minmax(340px,.8fr) minmax(460px,1.2fr);gap:18px;height:calc(100dvh - var(--oa-workbench-offset, 160px));min-height:480px;align-items:stretch}
 .oa-inbox .oa-list{min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 .oa-inbox .oa-tabs{gap:16px;padding:14px;flex-wrap:wrap;font-size:.86rem}
 .oa-inbox .oa-filters{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);padding:12px;gap:8px;border-bottom:1px solid var(--oa-border)}

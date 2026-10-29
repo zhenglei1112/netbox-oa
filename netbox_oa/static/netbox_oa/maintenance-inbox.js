@@ -23,6 +23,16 @@
   const auditScroll = () => audit().querySelector('.oa-audit-scroll');
   const historyScroll = () => audit().querySelector('dialog[open] .oa-audit-dialog-scroll') || auditScroll();
   const narrow = () => window.matchMedia('(max-width: 1000px)').matches || root().clientWidth <= 760;
+  // Fill the available viewport below the heading, leaving a small bottom gutter.
+  const fitWorkspace = () => {
+    const columns = root().querySelector('.oa-columns');
+    if (!columns) return;
+    const offset = Math.ceil(columns.getBoundingClientRect().top + window.scrollY + 24);
+    root().style.setProperty('--oa-workbench-offset', `${offset}px`);
+  };
+  const workspaceObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(fitWorkspace) : null;
+  window.addEventListener('resize', fitWorkspace);
   const savePosition = () => {
     history.replaceState({...history.state, oaList: list().scrollTop,
       oaDetail: detail().scrollTop, oaAudit: auditScroll().scrollTop,
@@ -56,6 +66,9 @@
 
   function enhance() {
     root().classList.add('oa-enhanced');
+    fitWorkspace();
+    workspaceObserver?.disconnect();
+    workspaceObserver?.observe(root());
     for (const panel of root().querySelectorAll('dialog')) {
       const tabs = [...panel.querySelectorAll('[data-oa-tab]')];
       if (tabs.length) {

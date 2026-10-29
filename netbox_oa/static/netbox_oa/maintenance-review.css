@@ -19,7 +19,7 @@ nav { overflow: auto; padding: 12px; flex: 1; }
 .material-index-row { position: relative; display: grid; grid-template-columns: minmax(44px,1fr) auto; align-items: center; gap: 4px; padding: 3px 8px 3px 24px; border-bottom: 1px solid var(--review-border); }
 .material-index-row:last-child { border-bottom: 0; }
 a.material-item-label { white-space: nowrap; color: var(--review-muted); justify-self: start; }
-.material-file-links { position: relative; display: flex; justify-content: flex-end; gap: 4px; align-items: center; pointer-events: none; }
+.material-file-links { grid-column: 2; position: relative; display: flex; justify-content: flex-end; gap: 4px; align-items: center; pointer-events: none; }
 .material-file-links > * { position: relative; z-index: 1; pointer-events: auto; flex-shrink: 0; }
 .material-maintenance { position: relative; }
 .material-maintenance[open] { z-index: 5; }

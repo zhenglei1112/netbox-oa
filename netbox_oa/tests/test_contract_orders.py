@@ -1,8 +1,12 @@
+from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import django_tables2 as tables
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import RequestFactory, TestCase
+from django.db.models import Q
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from netbox_oa.contract_tables import contract_order_table
@@ -10,6 +14,20 @@ from netbox_oa.contract_views import contract_orders
 from netbox_oa.models import MaintenanceDocument, MaintenanceOrder
 from netbox_oa.template_content import ContractOrders
 from netbox_oa.tests import test_maintenance
+
+
+def invoice_table_class(model, fields):
+    base = tables.table_factory(model, fields=fields)
+    table_class = type("TestInvoiceTable", (base,), {
+        "tags": tables.Column(default="—"),
+        "Meta": type("Meta", (base.Meta,), {"fields": (*fields, "tags")}),
+    })
+
+    def configure(self, request):
+        tables.RequestConfig(request, paginate={"per_page": 25}).configure(self)
+
+    table_class.configure = configure
+    return table_class
 
 
 class ContractOrderTests(TestCase):
@@ -173,3 +191,120 @@ class ContractOrderTests(TestCase):
         self.assertIn("暂无可查看的关联工单", extension.right_page())
         request.user = get_user_model().objects.create_user(username="no_oa")
         self.assertEqual(extension.right_page(), "")
+
+    def test_payment_filter_matches_exact_number_and_contract(self):
+        from tests.support.contracts.models import Invoice
+
+        match = Invoice.objects.create(number=self.order.number, amount=100)
+        match.contracts.add(self.contract)
+        other = Invoice.objects.create(number=self.order.number + "-other", amount=200)
+        other.contracts.add(self.contract)
+        Invoice.objects.create(number=self.order.number, amount=300)
+        template = Invoice.objects.create(number=self.order.number, amount=400, template=True)
+        template.contracts.add(self.contract)
+        table_class = invoice_table_class(Invoice, fields=("number", "amount", "contracts"))
+        self.client.force_login(self.actor)
+        with patch("netbox_oa.contract_views.import_module", return_value=SimpleNamespace(
+            InvoiceListTable=table_class
+        )):
+            response = self.client.get(self.url("payments"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["table"].data), [match])
+        self.assertContains(response, "清除筛选")
+        self.assertContains(response, self.order.number)
+        self.assertNotContains(response, other.number)
+
+    def test_payment_filter_requires_invoice_and_order_access(self):
+        user = get_user_model().objects.create_user(username="payment_no_access")
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(self.url("payments")).status_code, 404)
+        self.grant(user, "maintenanceorder", "view")
+        user.user_permissions.add(Permission.objects.get(
+            content_type__app_label="netbox_contract", codename="view_contract"
+        ))
+        self.assertEqual(self.client.get(self.url("payments")).status_code, 403)
+
+    def test_filtered_payments_do_not_query_contract_for_each_row(self):
+        from tests.support.contracts.models import Invoice
+
+        for _ in range(5):
+            invoice = Invoice.objects.create(number=self.order.number, amount=100)
+            invoice.contracts.add(self.contract)
+        table_class = invoice_table_class(Invoice, fields=("number", "contracts"))
+        self.client.force_login(self.actor)
+        with patch("netbox_oa.contract_views.import_module", return_value=SimpleNamespace(
+            InvoiceListTable=table_class
+        )):
+            response = self.client.get(self.url("payments"))
+        # Native payment action buttons read contracts.all for every payment.
+        rows = list(response.context["table"].paginated_rows)
+        with self.assertNumQueries(0):
+            for row in rows:
+                self.assertEqual(list(row.record.contracts.all()), [self.contract])
+
+    def test_filter_uses_native_column_configuration_and_prefix(self):
+        from tests.support.contracts.models import Invoice
+
+        invoice = Invoice.objects.create(number=self.order.number, amount=100)
+        invoice.contracts.add(self.contract)
+        table_class = invoice_table_class(Invoice, fields=("number", "amount", "contracts"))
+        configured = []
+
+        def configure(table, request):
+            configured.append(table.prefix)
+            # Model the native table's saved/default column selection. The amount
+            # column represents an optional column such as the custom SLA field.
+            table.columns.hide("amount")
+            table.columns.hide("tags")
+            table.sequence = ("number", "contracts", "amount")
+            tables.RequestConfig(request, paginate={"per_page": 25}).configure(table)
+
+        table_class.configure = configure
+        self.client.force_login(self.actor)
+        with patch("netbox_oa.contract_views.import_module", return_value=SimpleNamespace(
+            InvoiceListTable=table_class
+        )):
+            response = self.client.get(self.url("payments"))
+        self.assertEqual(configured, ["invoices_"])
+        table = response.context["table"]
+        self.assertEqual([column.name for column in table.columns], ["number", "tags"])
+        self.assertEqual(table.prefixed_order_by_field, "invoices_sort")
+
+
+class PaymentFaultFilterTests(SimpleTestCase):
+    def payment(self, start, end, tags=()):
+        return SimpleNamespace(
+            period_start=start, period_end=end,
+            tags=SimpleNamespace(all=lambda: [SimpleNamespace(pk=pk) for pk in tags]),
+        )
+
+    def test_periods_and_tags_stay_grouped_per_payment(self):
+        from netbox_oa.contract_views import payment_fault_filter
+
+        first = self.payment(date(2026, 1, 1), date(2026, 1, 2), (1, 2))
+        second = self.payment(date(2026, 2, 1), date(2026, 2, 2), (3,))
+        expected = Q(pk__in=[]) | (
+            Q(fault_occurrence_time__date__gte=first.period_start,
+              fault_occurrence_time__date__lte=first.period_end) & Q(tags__pk__in=[1, 2])
+        ) | (
+            Q(fault_occurrence_time__date__gte=second.period_start,
+              fault_occurrence_time__date__lte=second.period_end) & Q(tags__pk__in=[3])
+        )
+        self.assertEqual(payment_fault_filter([first, second]), expected)
+
+    def test_no_payment_or_invalid_dates_match_nothing(self):
+        from netbox_oa.contract_views import payment_fault_filter
+
+        self.assertEqual(payment_fault_filter([]), Q(pk__in=[]))
+        self.assertEqual(payment_fault_filter([
+            self.payment(None, date(2026, 1, 1)),
+            self.payment(date(2026, 2, 1), date(2026, 1, 1)),
+        ]), Q(pk__in=[]))
+
+    def test_untagged_payment_filters_only_its_period(self):
+        from netbox_oa.contract_views import payment_fault_filter
+
+        start, end = date(2026, 1, 1), date(2026, 1, 3)
+        self.assertEqual(payment_fault_filter([self.payment(start, end)]), Q(pk__in=[]) | Q(
+            fault_occurrence_time__date__gte=start, fault_occurrence_time__date__lte=end
+        ))

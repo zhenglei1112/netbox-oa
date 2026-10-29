@@ -17,6 +17,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from . import maintenance_services as services
+from .maintenance_contracts import order_object_links
 from .maintenance_diagram import build_diagram
 from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES, STAGES, build_steps, scan_fill_key
 from .maintenance_forms import (
@@ -256,6 +257,7 @@ def presentation(
     return {
         **summary,
         **payment_data,
+        **order_object_links(order, user),
         "has_stage_operations": bool(
             payment_contract_stage
             or node.get("kind") == "external"
@@ -1185,7 +1187,7 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
                     ("扫描件", "mdi-file-image-outline") if document.is_direct_scan else
                     ("用印后", "mdi-stamper") if document.is_sealed else
                     ("审批件", "mdi-file-check-outline") if document.kind == "scan" else
-                    ("电子版", "mdi-file-document-outline")
+                    ("电子版", "mdi-file-edit-outline")
                 )
                 row["files"].append({"document": document, "label": label, "icon": icon})
                 if document.pk in maintainable_ids:

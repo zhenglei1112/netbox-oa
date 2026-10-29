@@ -1,5 +1,6 @@
 """The alternate workbench must use the same permissions and workflow actions."""
 
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
@@ -39,6 +40,30 @@ class WorkbenchV2Tests(TestCase):
         self.assertTemplateUsed(old, "netbox_oa/maintenance/workbench.html")
         self.assertNotContains(old, 'class="oa-v2-workspace"')
         self.assertEqual(old.context["detail"]["order"].pk, self.order.pk)
+
+    def test_both_workbenches_link_supplier_and_contract(self):
+        from tests.support.contracts.models import ServiceProvider
+
+        with patch.object(
+            ServiceProvider, "get_absolute_url", return_value="/providers/1/", create=True
+        ):
+            response = self.page()
+            original = self.client.get(response.context["version_switch_url"])
+        contract_url = reverse("plugins:netbox_contract:contract", args=[self.contract.pk])
+        for page in (response, original):
+            self.assertContains(page, f'<a href="/providers/1/">{self.order.supplier}</a>')
+            self.assertContains(
+                page, f'<a href="{contract_url}">{self.order.contract_number}</a>'
+            )
+
+    def test_missing_contract_keeps_labels_without_links(self):
+        self.order.contract_id = None
+        self.order.save()
+        response = self.page()
+        self.assertEqual(response.context["detail"]["contract_url"], "")
+        self.assertEqual(response.context["detail"]["supplier_url"], "")
+        self.assertContains(response, self.order.supplier)
+        self.assertContains(response, self.order.contract_number)
 
     def test_each_live_node_has_guidance_and_completed_order_has_no_action(self):
         self.start()

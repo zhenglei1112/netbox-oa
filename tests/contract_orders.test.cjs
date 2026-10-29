@@ -85,3 +85,85 @@ test('permission/error pages and timeouts show failure; reopening retries', () =
   ui.frame.load();
   assert.equal(ui.frame.hidden, false);
 });
+
+
+test('clearing repeated linked filters restores original payment nodes and native handlers', async () => {
+  class Node {
+    constructor() {this.childNodes = []; this.listeners = {};}
+    get children() {return this.childNodes;}
+    append(...nodes) {
+      for (const node of nodes) {
+        if (node.parent) node.parent.childNodes.splice(node.parent.childNodes.indexOf(node), 1);
+        this.childNodes.push(node); node.parent = this;
+      }
+    }
+    replaceChildren(...nodes) {this.childNodes = []; this.append(...nodes.flatMap(
+      node => node.fragment ? [...node.childNodes] : [node]));}
+    set innerHTML(value) {this.childNodes = [new Node()]; this.html = value;}
+    get innerHTML() {return this.html || '';}
+    addEventListener(name, callback) {this.listeners[name] = callback;}
+    setAttribute() {}
+    removeAttribute() {}
+    after() {}
+    before() {}
+    replaceWith() {}
+    querySelector() {return null;}
+  }
+  const section = new Node(); section.dataset = {};
+  const header = new Node();
+  header.childNodes = [{nodeType: 3, textContent: '付款'}];
+  header.querySelectorAll = () => [];
+  const card = new Node();
+  header.closest = selector => selector === '.card' ? card : null;
+  const nativeTable = new Node();
+  let nativeRequests = 0;
+  nativeTable.addEventListener('click', () => {nativeRequests++;});
+  card.append(header, nativeTable);
+  const document = new Node();
+  document.getElementById = id => id === 'oa-contract-orders' ? section : null;
+  document.querySelectorAll = () => [header];
+  document.createElement = () => new Node();
+  document.createDocumentFragment = () => Object.assign(new Node(), {fragment: true});
+  class DOMParser {
+    parseFromString() {return {body: {innerHTML: '<div>filtered payments</div>'},
+      querySelector: selector => selector === '[data-oa-payment-results]' ? {} : null};}
+  }
+  let fail = false;
+  runInNewContext(source, {document, URL, AbortController, DOMParser,
+    window: {location: {href: 'https://example.test/contracts/1/'}, alert() {}},
+    fetch: async () => ({ok: !fail, text: async () => 'filtered'}),
+  });
+  const results = card.children.find(node => node !== header);
+  const attributes = new Map([['data-oa-payment-url', '/orders/1/payments/']]);
+  let spinning = false;
+  const filterButton = {
+    getAttribute: name => attributes.get(name) || null,
+    setAttribute: (name, value) => attributes.set(name, value),
+    removeAttribute: name => attributes.delete(name),
+    querySelector: () => ({classList: {toggle(name, value) {spinning = value;}}}),
+  };
+  const event = clear => ({preventDefault() {}, target: {closest(selector) {
+    if (selector === '[data-oa-payment-clear]') return clear ? {} : null;
+    if (selector === '[data-oa-payment-filter]') return clear ? null : filterButton;
+    return null;
+  }}});
+  for (let cycle = 0; cycle < 2; cycle++) {
+    const request = section.listeners.click(event(false));
+    assert.equal(attributes.get('aria-disabled'), 'true');
+    assert.equal(attributes.has('disabled'), true);
+    assert.equal(spinning, true);
+    await request;
+    assert.equal(attributes.has('disabled'), false);
+    assert.equal(attributes.has('aria-busy'), false);
+    assert.equal(spinning, false);
+    assert.notEqual(results.children[0], nativeTable);
+    await card.listeners.click(event(true));
+    assert.equal(results.children[0], nativeTable);
+    results.children[0].listeners.click();
+  }
+  assert.equal(nativeRequests, 2);
+  fail = true;
+  await section.listeners.click(event(false));
+  assert.equal(attributes.has('disabled'), false);
+  assert.equal(spinning, false);
+});

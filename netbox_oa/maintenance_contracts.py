@@ -3,6 +3,7 @@
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.urls import NoReverseMatch, reverse
 
 
 def service_regions(actor):
@@ -87,3 +88,29 @@ def selected_contract(actor, contract_id, service_region=None, service_region_id
         )
         values.update(region_selection(actor, ids))
     return values
+
+
+def order_object_links(order, actor):
+    """Resolve object links from the accessible contract, keeping stored labels intact."""
+    result = {"supplier_url": "", "contract_url": ""}
+    if not order.contract_id:
+        return result
+    try:
+        contract = purchase_contracts(actor).filter(pk=order.contract_id).first()
+    except ValidationError:
+        return result
+    if contract is None:
+        return result
+    try:
+        result["contract_url"] = reverse(
+            "plugins:netbox_contract:contract", args=[contract.pk]
+        )
+    except NoReverseMatch:
+        pass
+    supplier = contract.external_party_object
+    if supplier is not None and callable(getattr(supplier, "get_absolute_url", None)):
+        try:
+            result["supplier_url"] = supplier.get_absolute_url()
+        except NoReverseMatch:
+            pass
+    return result

@@ -1,0 +1,27 @@
+{% load django_tables2 %}
+<template data-oa-payment-header>
+  <h5 class="card-header d-flex align-items-center justify-content-between gap-3">
+    <span>付款<span class="badge text-bg-info ms-2">付款名称：{{ order.number }}</span></span>
+    <div class="d-flex align-items-center gap-3"><span data-oa-payment-actions></span><button type="button" class="btn btn-outline-secondary" data-oa-payment-clear title="清除筛选" aria-label="清除筛选"><i class="mdi mdi-filter-remove-outline" aria-hidden="true"></i> 清除筛选</button></div>
+  </h5>
+</template>
+<div data-oa-payment-results>
+  <div class="table-responsive">{% render_table table 'inc/table.html' %}</div>
+  {% if table.page.has_other_pages %}<nav class="p-3 d-flex align-items-center gap-3" aria-label="筛选付款分页">
+    {% if table.page.has_previous %}<a class="btn btn-outline-primary" data-oa-payment-filter href="{% querystring table.prefixed_page_field=table.page.previous_page_number %}">上一页</a>{% endif %}
+    <span>第 {{ table.page.number }} / {{ table.paginator.num_pages }} 页 · 共 {{ table.paginator.count }} 条</span>
+    {% if table.page.has_next %}<a class="btn btn-outline-primary" data-oa-payment-filter href="{% querystring table.prefixed_page_field=table.page.next_page_number %}">下一页</a>{% endif %}
+  </nav>{% endif %}
+</div>
+
+{% if linked_faults != None %}<template data-oa-linked-faults>
+  <div class="card mb-4" id="contract_otn_faults">
+    <h5 class="card-header d-flex align-items-center justify-content-between gap-3"><span>关联故障<span class="badge text-bg-info ms-2">工单 {{ order.number }} 对应付款</span></span><button type="button" class="btn btn-outline-secondary" data-oa-payment-clear title="清除筛选" aria-label="清除筛选"><i class="mdi mdi-filter-remove-outline" aria-hidden="true"></i> 清除筛选</button></h5>
+    <div class="table-responsive">{% render_table linked_faults 'inc/table.html' %}</div>
+    {% if linked_faults.page.has_other_pages %}<nav class="p-3 d-flex align-items-center gap-3" aria-label="筛选故障分页">
+      {% if linked_faults.page.has_previous %}<a class="btn btn-outline-primary" data-oa-payment-filter href="{% querystring linked_faults.prefixed_page_field=linked_faults.page.previous_page_number %}">上一页</a>{% endif %}
+      <span>第 {{ linked_faults.page.number }} / {{ linked_faults.paginator.num_pages }} 页 · 共 {{ linked_faults.paginator.count }} 条</span>
+      {% if linked_faults.page.has_next %}<a class="btn btn-outline-primary" data-oa-payment-filter href="{% querystring linked_faults.prefixed_page_field=linked_faults.page.next_page_number %}">下一页</a>{% endif %}
+    </nav>{% endif %}
+  </div>
+</template>{% endif %}

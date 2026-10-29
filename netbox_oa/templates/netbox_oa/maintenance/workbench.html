@@ -4,7 +4,7 @@
 {% block content %}
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
 <script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}?v=20261022-1">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}?v=20261023-3">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261018-1">
@@ -56,7 +56,7 @@
       {% if outside_list %}<p class="oa-notice">该工单不在当前筛选范围。</p>{% endif %}
       <section class="oa-description{% if detail.order.status == 'completed' %} oa-description-completed{% endif %}" aria-label="事项说明">
         <h3>事项说明</h3><div class="oa-prose">{{ detail.order.requirements|linebreaksbr }}</div>
-        <p class="oa-metadata">{{ detail.order.get_service_type_display }} · {{ detail.order.supplier }} · 合同 {{ detail.order.contract_number }}<br>{{ detail.order.service_region }} · {{ detail.order.service_location }}</p>
+        <p class="oa-metadata">{{ detail.order.get_service_type_display }} · {% if detail.supplier_url %}<a href="{{ detail.supplier_url }}">{{ detail.order.supplier }}</a>{% else %}{{ detail.order.supplier }}{% endif %} · 合同 {% if detail.contract_url %}<a href="{{ detail.contract_url }}">{{ detail.order.contract_number }}</a>{% else %}{{ detail.order.contract_number }}{% endif %}<br>{{ detail.order.service_region }} · {{ detail.order.service_location }}</p>
         <div class="oa-description-toolbar"><a class="btn btn-ghost-primary oa-text-action" data-oa-open="information" href="{{ detail_url }}&amp;panel=information">完整工单信息 →</a></div>
         {% include 'netbox_oa/maintenance/inbox_information.html' %}
         {% include 'netbox_oa/maintenance/inbox_materials.html' %}
@@ -82,6 +82,6 @@
     {% include 'netbox_oa/maintenance/inbox_activity.html' %}
   </div>
 </div>
-<script src="{% static 'netbox_oa/maintenance-inbox.js' %}?v=20261022-1" defer></script>
+<script src="{% static 'netbox_oa/maintenance-inbox.js' %}?v=20261023-1" defer></script>
 <script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}?v=20261018-2" defer></script>
 {% endblock %}

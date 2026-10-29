@@ -252,6 +252,52 @@ class MaterialItemTests(TestCase):
         self.assertEqual([entry["label"] for entry in order_group["index_rows"][0]["files"]],
                          ["用印后", "审批件", "电子版"])
 
+    def test_review_hides_single_item_labels_across_workbenches_and_contract_embed(self):
+        from netbox_oa.tests.test_inbox import PanelMarkup
+
+        self.reach("report_fill")
+        first = self.upload("report")
+        self.client.force_login(self.actor)
+        review_url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
+        contract_url = reverse("plugins:netbox_oa:contract_order_materials", kwargs={
+            "contract_id": self.contract.pk, "pk": self.order.pk,
+        })
+        entries = [(review_url, {"embed": "1"}),
+                   (review_url, {"embed": "1", "ui": "v2"}),
+                   (review_url, {"ui": "v3"}),
+                   (contract_url, {"embed": "1"})]
+        for multiple in (False, True):
+            if multiple:
+                self.upload("report")
+            for url, query in entries:
+                with self.subTest(url=url, query=query, multiple=multiple):
+                    response = self.client.get(url, {**query, "material": "report"})
+                    self.assertEqual(response.status_code, 200)
+                    markup = PanelMarkup(response.content.decode())
+                    row_links = [attrs for tag, attrs in markup.elements
+                                 if tag == "a" and "material-row-link"
+                                 in attrs.get("class", "").split()]
+                    self.assertEqual(len(row_links), 2 if multiple else 0)
+                    self.assertTrue(all("material=report&" in link["href"]
+                                        for link in row_links))
+                    file_links = [attrs for tag, attrs in markup.elements
+                                  if tag == "a" and "material-file"
+                                  in attrs.get("class", "").split()]
+                    order_group = next(group for group in response.context["groups"]
+                                       if group["key"] == "order")
+                    self.assertEqual(len(order_group["index_rows"]), 1)
+                    self.assertEqual(len(order_group["documents"]), 3)
+                    self.assertEqual(len(file_links), sum(len(group["documents"])
+                                                         for group in response.context["groups"]))
+                    self.assertContains(
+                        response, f'aria-label="服务报告 第 1 份 审批件 v{first.version}"'
+                    )
+                    if multiple:
+                        self.assertContains(response, '>第 1 份</a>')
+                        self.assertContains(response, '>第 2 份</a>')
+                    else:
+                        self.assertNotContains(response, '>第 1 份</a>')
+
     def test_review_defaults_to_first_item_before_file_priority(self):
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
