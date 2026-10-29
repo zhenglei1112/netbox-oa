@@ -80,9 +80,34 @@ class PluginTemplateExtension:
         )
 
 
+class PluginMenuItem:
+    def __init__(self, link, link_text, permissions=None, buttons=None):
+        self.link = link
+        self.link_text = link_text
+        self.permissions = permissions or []
+        self.buttons = buttons or ()
+
+
 plugins.PluginTemplateExtension = PluginTemplateExtension
+plugins.PluginMenuItem = PluginMenuItem
 sys.modules["netbox"] = netbox
 sys.modules["netbox.plugins"] = plugins
+
+# Minimal dashboard registry; widget queries and template rendering remain real.
+dashboard_widgets = types.ModuleType("extras.dashboard.widgets")
+dashboard_widgets.DashboardWidget = type("DashboardWidget", (), {})
+dashboard_widgets.registry = []
+
+
+def register_widget(widget):
+    dashboard_widgets.registry.append(widget)
+    return widget
+
+
+dashboard_widgets.register_widget = register_widget
+sys.modules["extras"] = types.ModuleType("extras")
+sys.modules["extras.dashboard"] = types.ModuleType("extras.dashboard")
+sys.modules["extras.dashboard.widgets"] = dashboard_widgets
 
 netbox_tables = types.ModuleType("netbox.tables")
 

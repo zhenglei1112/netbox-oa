@@ -327,6 +327,12 @@ v3 使用 NetBox 原生对象列表、详情及编辑模板。列表默认显示
 本次新增无需数据库迁移，部署时需执行 `collectstatic` 并重启服务。
 
 专项回归：`python -m django test netbox_oa.tests.test_maintenance_v3 --settings=tests.settings`。
+
+### 首页工单待办小组件
+
+在 NetBox 首页编辑仪表盘，添加“工单待办”小组件（默认 2×2）。小组件按当前用户的任务办理权限、工单查看权限及人员/组分配，统计进行中且待处理的工单数量，同一工单只计一次，包含审批及其他办理节点，不计未提交草稿。管理员沿用工单待办页的权限规则。
+
+有待办时显示橙色提示图标及数量，无待办时显示绿色完成图标和“暂无待办工单”；点击进入工单 V2 的“待办工单”页，该页面也会展示用户可处理的草稿。更新插件并重启 NetBox 后可添加此组件，无需数据库迁移。
 浏览器验证：设置 `NETBOX_SOURCE` 为本地 NetBox 源码目录后，运行
 `node tests/maintenance_v3.browser.cjs`，可通过 `PLAYWRIGHT_MODULE` 和 `BROWSER_CHANNEL`
 指定 Playwright 与浏览器。截图保存在 `.tmp/v3-browser-*`。该验证使用实际 OA 视图、

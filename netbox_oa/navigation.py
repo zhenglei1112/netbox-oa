@@ -14,7 +14,7 @@ menu_items = (
         permissions=["netbox_oa.view_maintenanceorder"],
     ),
     PluginMenuItem(
-        link="plugins:netbox_oa:maintenance_workbench",
+        link="plugins:netbox_oa:maintenance_workbench_v2",
         link_text="维护服务工单",
         permissions=["netbox_oa.view_maintenanceorder"],
     ),

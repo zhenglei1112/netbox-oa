@@ -15,5 +15,9 @@ class NetBoxOAConfig(PluginConfig):
     default_auto_field = "django.db.models.BigAutoField"
     default_settings = {"contract_service_region_field": "ProvincesOfResources"}
 
+    def ready(self):
+        super().ready()
+        from . import dashboard  # noqa: F401
+
 
 config = NetBoxOAConfig
