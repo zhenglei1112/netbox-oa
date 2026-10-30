@@ -525,6 +525,30 @@ def record_form_print(*, pk, actor):
     )
 
 
+def quick_complete_comment(task):
+    """Only review and seal steps without form/signature work support one-click handling."""
+    node = task.order.steps_snapshot[task.position]
+    if node.get("key") in {"order_correction", "order_review", "order_final"}:
+        return ""
+    if task.kind in {"approval", "countersign"}:
+        return "同意"
+    if task.kind == "action" and node.get("key") in {
+        "order_seal", "report_seal", "settlement_seal",
+    }:
+        return "已用印"
+    return ""
+
+
+@transaction.atomic
+def quick_complete_task(*, pk, actor):
+    order, task = _task(pk, actor)
+    task.order = order
+    comment = quick_complete_comment(task)
+    if not comment:
+        raise ValidationError("此节点需要填写、上传或签名，请进入工单详情办理。")
+    return complete_task(pk=pk, actor=actor, comment=comment)
+
+
 @transaction.atomic
 def complete_task(*, pk, actor, comment="", external_reference=""):
     _comment(comment)

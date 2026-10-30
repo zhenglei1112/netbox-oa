@@ -1,0 +1,32 @@
+{% load static %}
+<link rel="stylesheet" href="{% static 'netbox_oa/dashboard-todo.css' %}">
+<div class="oa-todo-list overflow-auto h-100">
+  <div class="alert alert-danger d-none m-2" role="alert" data-todo-error></div>
+  <ul class="oa-todo-items" aria-label="工单待办列表">
+    {% for row in rows %}
+      <li class="oa-todo-item{% if not row.comment %} oa-todo-item-manual{% endif %}">
+        <form class="oa-todo-check" method="post" action="{% url 'plugins:netbox_oa:maintenancetask_quick_complete' pk=row.task.pk %}">
+          {% csrf_token %}
+          <input type="checkbox" class="form-check-input" data-todo-complete
+                 aria-label="快速办理 {{ row.task.order.number }}"
+                 {% if row.comment %}title="{{ row.task.name }}：{{ row.comment }}"
+                 {% else %}disabled title="此节点需要填写、上传或签名，请进入工单详情办理。"{% endif %}>
+        </form>
+        <a class="oa-todo-content" href="{{ row.detail_url }}">
+          <span class="oa-todo-number">{{ row.task.order.number }}</span>
+          <span class="oa-todo-requester">
+            <i class="mdi mdi-account-outline" aria-hidden="true"></i>
+            <span class="visually-hidden">申请人：</span>
+            {{ row.task.order.requester.get_full_name|default:row.task.order.requester.username }}
+          </span>
+        </a>
+      </li>
+    {% empty %}
+      <li class="oa-todo-empty">
+        <i class="mdi mdi-check-all" aria-hidden="true"></i>
+        <span>暂无待办工单</span>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+<script src="{% static 'netbox_oa/dashboard-todo.js' %}"></script>

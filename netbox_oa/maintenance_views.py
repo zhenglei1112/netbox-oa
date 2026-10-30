@@ -902,6 +902,20 @@ class MaintenanceOrderActionView(LoginRequiredMixin, View):
         return workbench_redirect(request, pk)
 
 
+class MaintenanceTaskQuickCompleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        get_object_or_404(MaintenanceTask, pk=pk)
+        try:
+            services.quick_complete_task(pk=pk, actor=request.user)
+        except PermissionDenied:
+            return JsonResponse(
+                {"error": "当前任务的办理权限或分配已变化，请刷新页面。"}, status=403,
+            )
+        except ValidationError as exc:
+            return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
+        return JsonResponse({"success": True})
+
+
 class MaintenanceTaskActionView(LoginRequiredMixin, View):
     def post(self, request, pk, operation):
         task = get_object_or_404(MaintenanceTask, pk=pk)

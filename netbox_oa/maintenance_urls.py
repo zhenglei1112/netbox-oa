@@ -7,6 +7,11 @@ from . import maintenance_views as views
 
 urlpatterns = [
     path(
+        "maintenance/tasks/<int:pk>/quick-complete/",
+        views.MaintenanceTaskQuickCompleteView.as_view(),
+        name="maintenancetask_quick_complete",
+    ),
+    path(
         "contracts/<int:contract_id>/orders/<int:pk>/payments/",
         contract_views.ContractOrderPaymentsView.as_view(),
         name="contract_order_payments",

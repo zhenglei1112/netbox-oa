@@ -46,3 +46,32 @@ class MaintenanceTodoWidget(DashboardWidget):
             },
             request=request,
         )
+
+
+@register_widget
+class MaintenanceTodoListWidget(DashboardWidget):
+    default_title = "工单 TODO"
+    description = "显示待办工单号和申请人，勾选即可快速完成无需填写、上传或签名的节点。"
+    width = 4
+    height = 4
+
+    def render(self, request):
+        from .maintenance_services import quick_complete_comment
+        from .maintenance_views import actionable_tasks
+
+        rows = []
+        if request.user.is_authenticated:
+            tasks = actionable_tasks(request.user).filter(
+                position=F("order__current_position"),
+            ).select_related("order__requester").order_by("deadline", "pk")
+            for task in tasks:
+                rows.append({
+                    "task": task,
+                    "comment": quick_complete_comment(task),
+                    "detail_url": reverse(
+                        "plugins:netbox_oa:maintenance_v3_detail", args=[task.order_id],
+                    ),
+                })
+        return render_to_string(
+            "netbox_oa/inc/dashboard_todo_list_widget.html", {"rows": rows}, request=request,
+        )

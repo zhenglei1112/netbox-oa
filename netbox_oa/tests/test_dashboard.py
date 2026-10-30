@@ -4,7 +4,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
-from netbox_oa.dashboard import MaintenanceTodoWidget
+from netbox_oa.dashboard import MaintenanceTodoListWidget, MaintenanceTodoWidget
 from netbox_oa.tests import test_maintenance
 
 
@@ -110,3 +110,120 @@ class MaintenanceTodoWidgetTests(TestCase):
             self.render_widget(self.actor)
         self.assertEqual(render.call_args.args[1]["pending_count"], 1)
         self.assertEqual(render.call_args.args[1]["delegated_count"], 0)
+
+
+class MaintenanceTodoListWidgetTests(TestCase):
+    setUp = test_maintenance.MaintenanceTests.setUp
+    tearDown = test_maintenance.MaintenanceTests.tearDown
+    grant = test_maintenance.MaintenanceTests.grant
+    start = test_maintenance.MaintenanceTests.start
+
+    def render_widget(self, user):
+        request = RequestFactory().get("/")
+        request.user = user
+        return MaintenanceTodoListWidget().render(request)
+
+    def set_node(self, key):
+        from django.utils import timezone
+
+        from netbox_oa.models import MaintenanceTask
+
+        position = next(i for i, node in enumerate(self.order.steps_snapshot) if node["key"] == key)
+        node = self.order.steps_snapshot[position]
+        type(self.order).objects.filter(pk=self.order.pk).update(current_position=position)
+        self.order.tasks.update(status="completed")
+        return MaintenanceTask.objects.create(
+            order=self.order, position=position, kind=node["kind"], name=node["name"],
+            assigned_user=self.actor, deadline=timezone.now(),
+        )
+
+    def post_task(self, task):
+        self.client.force_login(self.actor)
+        return self.client.post(reverse(
+            "plugins:netbox_oa:maintenancetask_quick_complete", args=[task.pk],
+        ), {"comment": "客户端不应控制自动意见"})
+
+    def test_list_shows_number_requester_and_disables_signature_step(self):
+        self.start()
+        html = self.render_widget(self.actor)
+        self.assertIn(self.order.number, html)
+        self.assertIn(self.actor.username, html)
+        self.assertIn("disabled title=", html)
+        self.assertNotIn(self.order.requirements, html)
+        self.assertIn("暂无待办工单", self.render_widget(AnonymousUser()))
+
+    def test_quick_complete_approval_and_seal_with_server_comments(self):
+        from netbox_oa.models import MaintenanceEvent
+
+        self.start()
+        for key, comment in (("order_department_seal", "同意"), ("order_seal", "已用印")):
+            with self.subTest(key=key):
+                task = self.set_node(key)
+                with patch(
+                    "netbox_oa.maintenance_services._materials", return_value={},
+                ) as materials:
+                    response = self.post_task(task)
+                self.assertEqual(response.status_code, 200)
+                materials.assert_called_once()
+                task.refresh_from_db()
+                self.assertEqual(task.status, "completed")
+                self.assertEqual(task.comment, comment)
+                self.assertEqual(task.decided_by, self.actor)
+                self.assertEqual(
+                    MaintenanceEvent.objects.get(task=task, action="complete").details["comment"],
+                    comment,
+                )
+                self.assertEqual(self.post_task(task).status_code, 400)
+
+    def test_input_upload_and_signature_steps_cannot_be_bypassed(self):
+        self.start()
+        for key in (
+            "order_correction", "order_review", "order_final", "order_scan_fill",
+            "order_sealed_upload", "report_fill", "settlement_fill", "payment_plan", "payment_eip",
+        ):
+            with self.subTest(key=key):
+                task = self.set_node(key)
+                self.assertEqual(self.post_task(task).status_code, 400)
+                task.refresh_from_db()
+                self.assertEqual(task.status, "pending")
+
+    def test_missing_materials_still_block_quick_complete(self):
+        self.start()
+        task = self.set_node("order_seal")
+        html = self.render_widget(self.actor)
+        self.assertIn("已用印", html)
+        self.assertNotIn("disabled title=", html)
+        response = self.post_task(task)
+        self.assertEqual(response.status_code, 400)
+        task.refresh_from_db()
+        self.assertEqual(task.status, "pending")
+
+    def test_assignment_permissions_and_stale_order(self):
+        from django.contrib.auth import get_user_model
+
+        self.start()
+        task = self.set_node("order_seal")
+        other = get_user_model().objects.create_user(username="todo_outsider")
+        self.grant(other, "maintenanceorder", "view")
+        self.grant(other, "maintenancetask", "change")
+        self.assertNotIn(self.order.number, self.render_widget(other))
+        self.client.force_login(other)
+        url = reverse("plugins:netbox_oa:maintenancetask_quick_complete", args=[task.pk])
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.logout()
+        self.assertEqual(self.client.post(url).status_code, 302)
+        type(self.order).objects.filter(pk=self.order.pk).update(status="cancelled")
+        self.assertEqual(self.post_task(task).status_code, 400)
+        self.assertNotIn(self.order.number, self.render_widget(self.actor))
+
+    def test_csrf_and_post_required(self):
+        from django.test import Client
+
+        self.start()
+        task = self.set_node("order_seal")
+        url = reverse("plugins:netbox_oa:maintenancetask_quick_complete", args=[task.pk])
+        self.client.force_login(self.actor)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.actor)
+        self.assertEqual(client.post(url).status_code, 403)

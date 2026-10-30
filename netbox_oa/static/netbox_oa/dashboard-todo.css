@@ -1,0 +1,75 @@
+.oa-todo-list {
+  --oa-todo-accent: var(--tblr-primary, var(--bs-primary, #008b87));
+  --oa-todo-text: var(--tblr-body-color, var(--bs-body-color));
+  --oa-todo-muted: var(--tblr-secondary-color, var(--bs-secondary-color));
+  --oa-todo-border: var(--tblr-border-color, var(--bs-border-color));
+}
+
+.oa-todo-items {
+  display: flex;
+  flex-direction: column;
+  gap: .625rem;
+  margin: 0;
+  padding: .875rem;
+  list-style: none;
+}
+
+.oa-todo-item {
+  display: flex;
+  align-items: center;
+  gap: .875rem;
+  padding: .875rem 1rem;
+  border: 1px solid var(--oa-todo-border);
+  border-inline-start: 3px solid var(--oa-todo-accent);
+  border-radius: .75rem;
+  background: color-mix(in srgb, var(--oa-todo-accent) 4%, transparent);
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.oa-todo-item:hover,
+.oa-todo-item:focus-within {
+  border-color: var(--oa-todo-accent);
+  background: color-mix(in srgb, var(--oa-todo-accent) 8%, transparent);
+}
+
+.oa-todo-check { display: flex; flex: 0 0 auto; margin: 0; }
+.oa-todo-check .form-check-input { margin: 0; cursor: pointer; }
+.oa-todo-check .form-check-input:checked {
+  background-color: var(--oa-todo-accent);
+  border-color: var(--oa-todo-accent);
+}
+.oa-todo-check .form-check-input:focus {
+  border-color: var(--oa-todo-accent);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--oa-todo-accent) 20%, transparent);
+}
+.oa-todo-check .form-check-input:disabled { cursor: not-allowed; }
+
+.oa-todo-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: .25rem;
+  min-width: 0;
+  color: var(--oa-todo-text);
+  text-decoration: none;
+}
+.oa-todo-content:hover { color: var(--oa-todo-accent); text-decoration: none; }
+.oa-todo-content:focus-visible { outline: 2px solid var(--oa-todo-accent); outline-offset: 4px; }
+.oa-todo-number { font-weight: 600; overflow-wrap: anywhere; }
+.oa-todo-requester { color: var(--oa-todo-muted); font-size: .875rem; overflow-wrap: anywhere; }
+.oa-todo-requester .mdi { margin-inline-end: .25rem; }
+.oa-todo-item-manual { border-inline-start-color: var(--oa-todo-border); background: transparent; }
+
+.oa-todo-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .5rem;
+  padding: 2rem 1rem;
+  color: var(--oa-todo-muted);
+}
+.oa-todo-empty .mdi { color: var(--oa-todo-accent); font-size: 2rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-todo-item { transition: none; }
+}
