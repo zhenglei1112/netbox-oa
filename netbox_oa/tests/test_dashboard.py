@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -60,3 +62,51 @@ class MaintenanceTodoWidgetTests(TestCase):
     def test_default_layout(self):
         self.assertEqual(MaintenanceTodoWidget.default_title, "工单待办")
         self.assertEqual((MaintenanceTodoWidget.width, MaintenanceTodoWidget.height), (2, 2))
+
+    def test_drafts_belong_to_current_requester_even_for_admin(self):
+        from django.contrib.auth import get_user_model
+
+        self.assertIn("草稿 <strong>1</strong>", self.render_widget(self.actor))
+        other = get_user_model().objects.create_user(username="other_requester")
+        # The current account still owns the order, but is no longer its applicant.
+        type(self.order).objects.filter(pk=self.order.pk).update(requester=other)
+        self.assertIn("草稿 <strong>0</strong>", self.render_widget(self.actor))
+        self.assertIn("草稿 <strong>0</strong>", self.render_widget(other))
+        self.grant(other, "maintenanceorder", "view")
+        other = get_user_model().objects.get(pk=other.pk)
+        self.assertIn("草稿 <strong>1</strong>", self.render_widget(other))
+
+    def test_submitted_order_and_anonymous_have_no_drafts(self):
+        self.start()
+        self.assertIn("草稿 <strong>0</strong>", self.render_widget(self.actor))
+        self.assertIn("草稿 <strong>0</strong>", self.render_widget(AnonymousUser()))
+
+    def test_personal_and_delegated_tasks_follow_list_badges(self):
+        from django.contrib.auth import get_user_model
+
+        from netbox_oa.maintenance_presentation import InboxPresentation
+        from netbox_oa.maintenance_views import actionable_tasks
+
+        self.start()
+        task = self.order.tasks.get(status="pending")
+        other = get_user_model().objects.create_user(username="assigned_elsewhere")
+        for assignment, personal in ((None, False), (self.actor, True), (other, False)):
+            with self.subTest(assignment=assignment):
+                type(task).objects.filter(pk=task.pk).update(assigned_user=assignment)
+                with patch("netbox_oa.dashboard.render_to_string", return_value="") as render:
+                    self.render_widget(self.actor)
+                context = render.call_args.args[1]
+                self.assertEqual(context["pending_count"], int(personal))
+                self.assertEqual(context["delegated_count"], int(not personal))
+                self.assertTrue(context["has_pending"])
+                self.assertEqual(context["draft_count"], 0)
+                summary = InboxPresentation(
+                    [self.order], self.actor, actionable_tasks(self.actor)
+                ).summary(self.order)
+                self.assertEqual(summary["status_label"], "待你审批" if personal else "可代办")
+        type(task).objects.filter(pk=task.pk).update(assigned_user=None)
+        self.group.users.add(self.actor)
+        with patch("netbox_oa.dashboard.render_to_string", return_value="") as render:
+            self.render_widget(self.actor)
+        self.assertEqual(render.call_args.args[1]["pending_count"], 1)
+        self.assertEqual(render.call_args.args[1]["delegated_count"], 0)
