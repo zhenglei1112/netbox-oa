@@ -47,16 +47,31 @@
 .oa-todo-content {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: .25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
   min-width: 0;
   color: var(--oa-todo-text);
   text-decoration: none;
 }
 .oa-todo-content:hover { color: var(--oa-todo-accent); text-decoration: none; }
 .oa-todo-content:focus-visible { outline: 2px solid var(--oa-todo-accent); outline-offset: 4px; }
-.oa-todo-number { font-weight: 600; overflow-wrap: anywhere; }
-.oa-todo-requester { color: var(--oa-todo-muted); font-size: .875rem; overflow-wrap: anywhere; }
+.oa-todo-number {
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oa-todo-requester {
+  flex-shrink: 0;
+  max-width: 40%;
+  color: var(--oa-todo-muted);
+  font-size: .875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .oa-todo-requester .mdi { margin-inline-end: .25rem; }
 .oa-todo-item-manual { border-inline-start-color: var(--oa-todo-border); background: transparent; }
 
