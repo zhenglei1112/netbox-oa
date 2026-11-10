@@ -107,7 +107,8 @@
           content.replaceChildren(image);
           await ready;
         } else {
-          message(content, '此文件格式暂不支持在线展示，请下载原文件查看。');
+          window.oaNotify?.('此文件格式暂不支持在线展示，请下载原文件查看。', 'info');
+          content.replaceChildren();
         }
         if (state.disposed) return false;
         article.classList.add('review-loaded');
@@ -115,7 +116,8 @@
       } catch (error) {
         if (state.disposed) return false;
         states.delete(article);
-        message(content, '材料加载失败，请重试或下载原文件查看。');
+        window.oaNotify?.('材料加载失败，请重试或下载原文件查看。');
+        content.replaceChildren();
         const retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'btn btn-ghost-primary';
@@ -157,7 +159,8 @@
     }
     if (!loaded && active && active !== article) {
       for (const item of articles) item.hidden = item !== active;
-      feedback.textContent = '材料加载失败，当前文档已保留。';
+      window.oaNotify?.('材料加载失败，当前文档已保留。');
+      feedback.textContent = '';
       const retry = document.createElement('button');
       retry.type = 'button';
       retry.className = 'btn btn-ghost-primary';
@@ -168,6 +171,8 @@
     }
     const previous = active;
     for (const item of articles) item.hidden = item !== article;
+    const emptyState = stream.querySelector('.empty-state');
+    if (emptyState) emptyState.hidden = true;
     stream.scrollTop = 0;
     select(article);
     if (previous && previous !== article) unload(previous);
@@ -186,7 +191,9 @@
     if (article) return jump(article, true);
   });
   const initial = articles.find(item => item.dataset.document === stream.dataset.selected)
-    || articles.find(item => item.dataset.material === stream.dataset.material) || articles[0];
+    || (!stream.dataset.category && (
+      articles.find(item => item.dataset.material === stream.dataset.material) || articles[0]
+    ));
   if (initial) jump(initial);
   window.addEventListener('pagehide', event => {
     if (event.persisted) return;

@@ -62,6 +62,9 @@ class InboxPresentation:
         self.group_ids = set(user.groups.values_list("pk", flat=True))
         ids = [order.pk for order in orders]
         self.actionable = set(actionable.filter(order_id__in=ids).values_list("pk", flat=True))
+        self.changeable = set(MaintenanceTask.objects.restrict(user, "change").filter(
+            order_id__in=ids, status="pending", order__status="active"
+        ).values_list("pk", flat=True))
         visible_tasks = MaintenanceTask.objects.restrict(user, "view")
         self.tasks = defaultdict(list)
         for task in (
@@ -131,7 +134,6 @@ class InboxPresentation:
         current = latest.get(order.current_position) if order.status == "active" else None
         if current and current.status != "pending":
             current = None
-        can_act = bool(current and current.pk in self.actionable)
         assigned = bool(
             current
             and (
@@ -139,9 +141,16 @@ class InboxPresentation:
                 or (not current.assigned_user_id and current.assigned_group_id in self.group_ids)
             )
         )
+        has_task_permission = bool(current and assigned and current.pk in self.changeable)
+        own_approval = bool(current and current.kind in {"approval", "countersign"}
+                            and order.requester_id == self.user.pk)
+        self_approval_blocked = has_task_permission and own_approval
+        can_act = bool(current and current.pk in self.actionable and not own_approval)
         status = order.get_status_display()
         if order.status == "active":
             status = "等待他人" if current else "进行中"
+            if self_approval_blocked:
+                status = "等待其他审批人"
             if can_act:
                 status = (
                     ("待你审批" if current.kind in {"approval", "countersign"} else "待你处理")
@@ -227,6 +236,7 @@ class InboxPresentation:
             "order": order,
             "current": current,
             "can_act": can_act,
+            "self_approval_blocked": self_approval_blocked,
             "assigned_to_me": assigned,
             "status_label": status,
             "requester_name": person_name(order.requester, self.user),
@@ -396,13 +406,13 @@ class InboxPresentation:
         for stage in stages.values():
             for node in stage["nodes"]:
                 title_extra = (len(wrap(node["name"], 17)) - 1) * 20
-                node["height"] = 84 + title_extra + max(0, len(node["attempts"]) - 1) * 36
+                node["height"] = 64 + title_extra + max(0, len(node["attempts"]) - 1) * 30
         diagram = build_diagram(list(stages.values()), node_gap=24)
         diagram["node_height"] = max(node["height"] for node in diagram["nodes"])
         for node in diagram["nodes"]:
-            content_y = node["label_lines"][-1]["y"] + 24
+            content_y = node["label_lines"][-1]["y"] + 17
             for index, attempt in enumerate(node["attempts"]):
-                attempt["actor_y"] = content_y + index * 36
-                attempt["time_y"] = attempt["actor_y"] + 17
+                attempt["actor_y"] = content_y + index * 30
+                attempt["time_y"] = attempt["actor_y"] + 14
             node["empty_y"] = content_y
         return diagram

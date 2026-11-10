@@ -1,7 +1,7 @@
 {% load django_tables2 %}
 <template data-oa-payment-header>
   <h5 class="card-header d-flex align-items-center justify-content-between gap-3">
-    <span>付款<span class="badge text-bg-info ms-2">付款名称：{{ order.number }}</span></span>
+    <span>付款<span class="badge text-bg-info ms-2">付款名称包含：{{ order.number }}</span></span>
     <div class="d-flex align-items-center gap-3"><span data-oa-payment-actions></span><button type="button" class="btn btn-outline-secondary" data-oa-payment-clear title="清除筛选" aria-label="清除筛选"><i class="mdi mdi-filter-remove-outline" aria-hidden="true"></i> 清除筛选</button></div>
   </h5>
 </template>

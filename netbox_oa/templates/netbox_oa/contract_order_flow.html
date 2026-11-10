@@ -2,6 +2,7 @@
 <!doctype html>
 <html lang="zh-hans">
 <head>
+{% include 'netbox_oa/inc/notifications.html' %}
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ detail.order.number }} · 办理流程</title>
   <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
@@ -9,8 +10,8 @@
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
   <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}">
   <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/contract-orders.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261105-2">
+  <link rel="stylesheet" href="{% static 'netbox_oa/contract-orders.css' %}?v=20261105-1">
 </head>
 <body data-oa-contract-ready>
 <main class="oa-workbench oa-inbox oa-industrial oa-approval-panel oa-contract-flow">

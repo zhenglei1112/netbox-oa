@@ -29,7 +29,8 @@ function setup() {
     return id === 'oa-contract-dialog' ? dialog : null;
   }});
   const timers = new Map(); let sequence = 0;
-  runInNewContext(source, {document,
+  const notifications = [];
+  runInNewContext(source, {document, window: {oaNotify: text => notifications.push(text)},
     setTimeout(callback) {timers.set(++sequence, callback); return sequence;},
     clearTimeout(id) {timers.delete(id);},
   });
@@ -37,7 +38,7 @@ function setup() {
     getAttribute() {return '查看工单流程';}, focus() {this.focused = true;},
   };
   const open = () => document.click({target: {closest() {return link;}}, preventDefault() {}});
-  return {dialog, frame, status, title, button, link, timers, open};
+  return {dialog, frame, status, title, button, link, timers, open, notifications};
 }
 
 test('loads on demand, opens one modal, closes from iframe Escape and restores focus', () => {
@@ -74,12 +75,12 @@ test('permission/error pages and timeouts show failure; reopening retries', () =
   const ui = setup(); ui.open();
   ui.frame.contentDocument.querySelector = () => null;
   ui.frame.load();
-  assert.match(ui.status.textContent, /加载失败/);
+  assert.match(ui.notifications.at(-1), /加载失败/);
   assert.equal(ui.frame.hidden, true);
   ui.button.click(); ui.open();
   assert.match(ui.status.textContent, /正在加载/);
   [...ui.timers.values()][0]();
-  assert.match(ui.status.textContent, /加载失败/);
+  assert.match(ui.notifications.at(-1), /加载失败/);
   ui.button.click(); ui.open();
   ui.frame.contentDocument.querySelector = () => ({});
   ui.frame.load();
@@ -108,6 +109,7 @@ test('clearing repeated linked filters restores original payment nodes and nativ
     before() {}
     replaceWith() {}
     querySelector() {return null;}
+    querySelectorAll() {return [];}
   }
   const section = new Node(); section.dataset = {};
   const header = new Node();
@@ -129,7 +131,8 @@ test('clearing repeated linked filters restores original payment nodes and nativ
       querySelector: selector => selector === '[data-oa-payment-results]' ? {} : null};}
   }
   let fail = false;
-  runInNewContext(source, {document, URL, AbortController, DOMParser,
+  runInNewContext(source, {document, window: {oaNotify: text => notifications.push(text)}, URL, AbortController, DOMParser,
+    MutationObserver: class {observe() {}},
     window: {location: {href: 'https://example.test/contracts/1/'}, alert() {}},
     fetch: async () => ({ok: !fail, text: async () => 'filtered'}),
   });

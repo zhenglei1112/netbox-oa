@@ -12,8 +12,8 @@ from .maintenance_contracts import (
     selected_contract,
     service_regions,
 )
-from .maintenance_flow import FLOW_NAME, ROLES
-from .maintenance_materials import SERVICE_ITEMS
+from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES
+from .maintenance_materials import SERVICE_EFFECTS, SERVICE_ITEMS, company_form_initial
 from .maintenance_numbering import issue_number, number_from_token
 from .models import MaintenanceDocument, MaintenanceOrder, MaintenancePolicy
 
@@ -151,11 +151,25 @@ class MaintenanceOrderForm(ContractFieldsMixin, StyledForm, ChangelogMessageMixi
             except ValidationError as exc:
                 self.fields["number"].help_text = "; ".join(exc.messages)
         self.order_fields(["number", *self._meta.fields, "number_token"])
+        self.fields["number"].widget.attrs["data-number-base"] = (
+            self.instance.number_reservation_id
+            if self.instance.pk else self.initial.get("number", "")
+        )
+        if not self.fields["number"].help_text:
+            self.fields["number"].help_text = (
+                "草稿编号随合同类型调整，首次提交审批后固定。"
+                if not self.instance.pk or self.instance.status == "draft"
+                else "编号中的合同类型以首次提交审批时为准。"
+            )
+        self.fields["number"].widget.attrs["data-number-fixed"] = (
+            "1" if self.instance.pk and self.instance.status != "draft" else "0"
+        )
         self.style_fields()
 
     def clean(self):
         data = super().clean()
         data.pop("number", None)
+        data.pop("contract_type_snapshot", None)
         if not self.instance.pk and data.get("number_token"):
             number_from_token(data["number_token"], self.actor)
         return data
@@ -169,7 +183,7 @@ class MaintenanceOrderEditForm(MaintenanceOrderForm):
 
 class MaintenanceActionForm(StyledForm, forms.Form):
     comment = forms.CharField(
-        label="处理意见或办理凭证说明",
+        label="处理意见",
         required=False,
         max_length=4000,
         widget=forms.Textarea(attrs={"rows": 2}),
@@ -183,6 +197,14 @@ class MaintenanceActionForm(StyledForm, forms.Form):
 
     def __init__(self, *args, order=None, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
+        if order:
+            current = order.tasks.filter(status="pending").first()
+            if current and order.steps_snapshot[current.position]["key"] == "payment_eip":
+                self.fields["external_reference"].label = "外部付款申请单号"
+            if current and current.kind in {"approval", "countersign"}:
+                self.fields["user_id"].queryset = self.fields["user_id"].queryset.exclude(
+                    pk=order.requester_id
+                )
         self.style_fields()
 
 
@@ -280,6 +302,7 @@ class MaintenanceDocumentForm(StyledForm, forms.ModelForm):
 
     def __init__(self, *args, scan=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["material"].choices = MATERIALS
         self.fields["state"].choices = [
             choice
             for choice in self.fields["state"].choices
@@ -319,9 +342,34 @@ class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):
     signature = forms.CharField(label="签字", disabled=True, required=False)
     signature_date = forms.DateField(label="日期", disabled=True, required=False)
 
-    def __init__(self, *args, material, actor, **kwargs):
+    def __init__(self, *args, material, actor, order=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if material == "report":
+        if material == "acceptance":
+            self.fields.pop("signature")
+            self.fields.pop("signature_date")
+            for name, value in company_form_initial(order).items():
+                if name in self.fields:
+                    self.fields[name].disabled = True
+                    self.initial[name] = value
+            self.fields["service_effect"] = forms.ChoiceField(
+                label="服务效果", choices=(("", "请选择"), *SERVICE_EFFECTS),
+                error_messages={"required": "请选择服务效果。",
+                                "invalid_choice": "请选择有效的服务效果。"},
+                widget=forms.Select(attrs={"data-required-message": "请选择服务效果。"}),
+            )
+            self.fields["settlement_amount"] = forms.DecimalField(
+                label="结算金额（元）", max_digits=14, decimal_places=2, min_value=0,
+                widget=forms.NumberInput(attrs={"step": "0.01"}),
+            )
+            from .maintenance_billing import configured, summary
+
+            if configured(order):
+                self.fields["settlement_amount"].disabled = True
+                self.initial["settlement_amount"] = summary(order)["total"]
+                self.fields["settlement_amount"].help_text = (
+                    "自动汇总结算费用明细"
+                )
+        elif material == "report":
             self.fields.pop("requirements")
             self.fields.pop("contact_phone")
             self.fields["requested_at"].label = "申请时间"

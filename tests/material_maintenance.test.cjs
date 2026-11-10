@@ -16,7 +16,7 @@ function setup({confirmed = true, ok = true} = {}) {
     href: 'https://oa.test/review/?embed=1&material=report&document=1',
     replace: url => calls.push({url}),
   };
-  const window = {confirm: () => confirmed, alert: message => calls.push({message})};
+  const window = {oaConfirm: async () => confirmed, oaNotify: message => calls.push({message})};
   window.addEventListener = () => {};
   window.parent = window;
   runInNewContext(source, {

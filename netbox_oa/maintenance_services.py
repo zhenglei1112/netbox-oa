@@ -17,9 +17,10 @@ from .maintenance_materials import (
     COMPANY_FORMS,
     ORDER_FORM_FIELDS,
     PRINTABLE_FORMS,
+    TASK_SIGNING_NODES,
     company_form_initial,
 )
-from .maintenance_numbering import issue_number, number_from_token
+from .maintenance_numbering import draft_number, issue_number, number_from_token
 from .models import (
     MaintenanceDocument,
     MaintenanceEvent,
@@ -47,6 +48,18 @@ def _order(pk, actor, action="change"):
     order = MaintenanceOrder.objects.select_for_update().get(pk=pk)
     _snapshot(order)
     return order
+
+
+class SelfApprovalDenied(PermissionDenied):
+    """The requester cannot act as an approver, including superuser delegation."""
+
+
+SELF_APPROVAL_MESSAGE = "不能审批自己发起的工单或验收单，请由其他审批人办理。"
+
+
+def check_self_approval(order, task, actor):
+    if task.kind in {"approval", "countersign"} and order.requester_id == actor.pk:
+        raise SelfApprovalDenied(SELF_APPROVAL_MESSAGE)
 
 
 def task_is_assigned(task, actor):
@@ -169,6 +182,9 @@ def create_order(*, actor, policy, number_token=None, changelog_message="", **da
         raise ValidationError("请由线路主管本人发起工单。")
     if not owner.is_active:
         raise ValidationError("线路主管账号未启用。")
+    if {"number_reservation", "number_reservation_id", "number_type_snapshot",
+        "contract_type_snapshot"} & set(data):
+        raise ValidationError("编号与合同类型由系统确定，不能人工指定。")
     if "number" in data:
         raise ValidationError("工单号由系统自动生成，不能人工指定。")
     data.update(
@@ -186,7 +202,10 @@ def create_order(*, actor, policy, number_token=None, changelog_message="", **da
         if number_token
         else issue_number(actor)[0]
     )
-    order = MaintenanceOrder(policy=policy, requester=actor, owner=owner, number=number, **data)
+    order = MaintenanceOrder(
+        policy=policy, requester=actor, owner=owner, number_reservation_id=number,
+        number=draft_number(number, data["contract_type_snapshot"]), **data,
+    )
     order._changelog_message = changelog_message
     _save(order)
     MaintenanceNumberReservation.objects.filter(number=number, actor=actor).update(used=True)
@@ -253,6 +272,19 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
             region = order.service_region
             region_ids = order.service_region_ids or None
         data.update(selected_contract(actor, contract_id, region, region_ids))
+    if "contract_type_snapshot" not in data:
+        data["contract_type_snapshot"] = selected_contract(
+            actor, order.contract_id
+        )["contract_type_snapshot"]
+    if order.status == "draft":
+        data["number"] = draft_number(
+            order.number_reservation_id,
+            data.get("contract_type_snapshot", order.contract_type_snapshot),
+        )
+    previous_contract = {
+        "id": order.contract_id, "number": order.contract_number,
+        "type": dict(order.contract_type_snapshot),
+    }
     data = {key: value for key, value in data.items() if getattr(order, key) != value}
     order._changelog_message = changelog_message
     if not data:
@@ -272,7 +304,9 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
         form_data.update({key: getattr(order, key) for key in ORDER_FORM_FIELDS})
         _create_company_document(order, actor, "order", form_data, audit=False)
     _event(order, actor, "edit", "修改并保存工单资料", fields=sorted(data),
-           changelog_message=changelog_message)
+           changelog_message=changelog_message, contract_before=previous_contract,
+           contract_after={"id": order.contract_id, "number": order.contract_number,
+                           "type": order.contract_type_snapshot})
     return order
 
 
@@ -285,8 +319,15 @@ def start_order(*, pk, actor):
         raise ValidationError("工单已提交审批，请刷新页面查看进度。")
     from .maintenance_signatures import draft_signature_for_submission
 
+    current_type = selected_contract(actor, order.contract_id)["contract_type_snapshot"]
+    if not current_type.get("code"):
+        raise ValidationError("请先为所选合同设置合同类型，并配置该类型的一位编号代码。")
+    if current_type != order.contract_type_snapshot or order.number != draft_number(
+        order.number_reservation_id, current_type
+    ):
+        raise ValidationError("合同类型已变更，请重新保存草稿并签名后提交。")
     signature = draft_signature_for_submission(order)
-    selected_contract(actor, order.contract_id)
+    order.number_type_snapshot = dict(current_type)
     policy = MaintenancePolicy.objects.select_for_update().get(pk=order.policy_id)
     if not policy.enabled:
         raise ValidationError("流程配置已停用。")
@@ -315,6 +356,7 @@ def start_order(*, pk, actor):
         signature_id=signature.pk,
         submitter_id=actor.pk,
         signer_id=signature.signer_id,
+        number_type=order.number_type_snapshot,
     )
     return order
 
@@ -348,6 +390,20 @@ def material_set_adjusted(order, task, material):
 
 
 def material_scan_sources(order, material):
+    """Current approval originals: the reviewed order form or submitted scans."""
+    if material in {"order", "acceptance"}:
+        source_key = "order_final" if material == "order" else "acceptance_apply"
+        final_positions = [
+            i for i, node in enumerate(order.steps_snapshot) if node["key"] == source_key
+        ]
+        approval = order.tasks.filter(
+            position__in=final_positions, status="completed"
+        ).order_by("-pk").first()
+        return order.documents.filter(
+            pk=approval.evidence.get(material) if approval else None,
+            material=material, kind="form", removed_at__isnull=True,
+            replacement_documents__isnull=True,
+        )
     fill_positions = [
         i for i, node in enumerate(order.steps_snapshot) if node["key"] == scan_fill_key(material)
     ]
@@ -382,7 +438,7 @@ def material_maintenance_documents(order, task, material):
     node = order.steps_snapshot[task.position]
     if material not in dict(node.get("required", [])):
         return documents.none()
-    if node.get("scan_material") == material:
+    if node.get("scan_material") == material or material in node.get("scan_materials", []):
         if node["key"] == scan_fill_key(material):
             return material_scan_candidates(order, material)
         if node["key"] == f"{material}_sealed_upload":
@@ -440,11 +496,24 @@ def remove_document(*, pk, actor):
 
 
 def _materials(order, node):
+    if node.get("scan_materials"):
+        ids = {}
+        for material in node["scan_materials"]:
+            ids.update(_materials(order, {"scan_material": material,
+                                          "required": [(material, "scan")]}))
+        remaining = {**node, "scan_materials": [], "required": [
+            (material, state) for material, state in node["required"]
+            if material not in node["scan_materials"]
+        ]}
+        ids.update(_materials(order, remaining))
+        return ids
     scan_material = node.get("scan_material")
     if scan_material:
         label = dict(MATERIALS)[scan_material]
         scans = list(material_scan_sources(order, scan_material))
-        if not scans or any(not scan.file for scan in scans):
+        if scan_material == "order" and not scans:
+            raise ValidationError("请先完成工单部门审核，使用本次审核通过的工单表单办理用印。")
+        if not scans or any(scan.kind != "form" and not scan.file for scan in scans):
             raise ValidationError(
                 f"请至少上传一份扫描版{label}。"
                 + ("甲方表单和电子附件不能替代乙方报告。" if scan_material == "report" else "")
@@ -471,9 +540,12 @@ def _materials(order, node):
     missing = []
     errors = []
     for material, state in node["required"]:
-        document = order.documents.filter(
+        documents = order.documents.filter(
             material=material, removed_at__isnull=True, replacement_documents__isnull=True
-        ).order_by("-version").first()
+        )
+        if material in COMPANY_FORMS and state == "electronic":
+            documents = documents.filter(kind="form")
+        document = documents.order_by("-version").first()
         rank = {"electronic": 0, "scan": 1, "sealed": 2}
         if document and document.kind == "form" and material == "report":
             errors.append("服务报告甲方表单不能替代乙方报告，请上传乙方完成的服务报告。")
@@ -528,12 +600,12 @@ def record_form_print(*, pk, actor):
 def quick_complete_comment(task):
     """Only review and seal steps without form/signature work support one-click handling."""
     node = task.order.steps_snapshot[task.position]
-    if node.get("key") in {"order_correction", "order_review", "order_final"}:
+    if node.get("key") in TASK_SIGNING_NODES:
         return ""
     if task.kind in {"approval", "countersign"}:
         return "同意"
     if task.kind == "action" and node.get("key") in {
-        "order_seal", "report_seal", "settlement_seal",
+        "order_seal", "report_seal", "settlement_seal", "acceptance_seal",
     }:
         return "已用印"
     return ""
@@ -542,6 +614,7 @@ def quick_complete_comment(task):
 @transaction.atomic
 def quick_complete_task(*, pk, actor):
     order, task = _task(pk, actor)
+    check_self_approval(order, task, actor)
     task.order = order
     comment = quick_complete_comment(task)
     if not comment:
@@ -553,8 +626,19 @@ def quick_complete_task(*, pk, actor):
 def complete_task(*, pk, actor, comment="", external_reference=""):
     _comment(comment)
     order, task = _task(pk, actor)
+    check_self_approval(order, task, actor)
+    if task.kind in {"approval", "countersign"} and not comment.strip():
+        comment = "同意"
     node = order.steps_snapshot[task.position]
     evidence = _materials(order, node)
+    if node["key"] == "acceptance_apply":
+        from .maintenance_billing import configured, summary
+
+        if configured(order):
+            billing = summary(order, require_complete=True)
+            acceptance = order.documents.get(pk=evidence["acceptance"])
+            if acceptance.form_data.get("settlement_billing") != billing:
+                raise ValidationError("结算单计费明细已变更，请重新保存验收单并签名后提交。")
     for material, baseline in task.evidence.get("correction_baseline", {}).items():
         latest = order.documents.filter(
             material=material, removed_at__isnull=True, replacement_documents__isnull=True
@@ -574,17 +658,15 @@ def complete_task(*, pk, actor, comment="", external_reference=""):
     if len(external_reference) > 200:
         raise ValidationError("外部单号不能超过 200 字符。")
     handwritten = None
-    if node["key"] in {"order_correction", "order_review", "order_final"}:
+    if node["key"] in TASK_SIGNING_NODES:
         from .maintenance_signatures import signature_for_approval
 
-        handwritten = signature_for_approval(
-            task, actor, required=node["key"] in {"order_correction"}
-        )
+        handwritten = signature_for_approval(task, actor, required=True)
     _begin_task(task, actor)
     _transition(task, "complete", actor, comment)
     task.decided_by, task.completed_at, task.comment = actor, timezone.now(), comment
     task.external_reference, task.evidence = external_reference, dict(evidence)
-    if node["key"] in {"order_correction", "order_review", "order_final"}:
+    if node["key"] in TASK_SIGNING_NODES:
         signer = handwritten.signer if handwritten else actor
         task.evidence["signature"] = {
             "name": signer.get_full_name() or signer.get_username(),
@@ -618,9 +700,12 @@ def complete_task(*, pk, actor, comment="", external_reference=""):
 
 
 @transaction.atomic
-def return_task(*, pk, actor, comment):
-    _comment(comment, required=True)
+def return_task(*, pk, actor, comment=""):
+    _comment(comment)
+    if not comment.strip():
+        comment = "退回补正"
     order, task = _task(pk, actor)
+    check_self_approval(order, task, actor)
     node = order.steps_snapshot[task.position]
     key = node["return_to"]
     if not key or task.kind not in {"approval", "external", "countersign"}:
@@ -673,6 +758,8 @@ def transfer_task(*, pk, actor, user_id, comment):
     _comment(comment, required=True)
     order, task = _task(pk, actor)
     target = _target(user_id, order)
+    if task.kind in {"approval", "countersign"} and target.pk == order.requester_id:
+        raise ValidationError("不能将审批任务转办给工单发起人。")
     if (
         task.assigned_group_id
         and not target.is_superuser
@@ -703,7 +790,10 @@ def countersign_task(*, pk, actor, user_id, comment):
     order, task = _task(pk, actor)
     if task.kind != "approval":
         raise ValidationError("只能在审核节点后增加会签。")
+    check_self_approval(order, task, actor)
     target = _target(user_id, order)
+    if target.pk == order.requester_id:
+        raise ValidationError("不能将工单发起人添加为加签审批人。")
     current = order.steps_snapshot[task.position]
     if (
         task.assigned_group_id
@@ -787,6 +877,14 @@ def check_company_form_access(order, actor, material):
         if material != "order" or not current or not task_is_assigned(current, actor):
             raise PermissionDenied("只有甲方经办人员可以填写公司表单。")
         _allowed(MaintenanceTask, actor, "change", current.pk)
+    if material == "acceptance":
+        current = order.tasks.filter(status="pending").first()
+        if not current or order.steps_snapshot[current.position]["key"] != "acceptance_apply":
+            raise ValidationError("仅验收申请环节可以填写或修订验收单。")
+        if not task_is_assigned(current, actor):
+            raise PermissionDenied("只有验收申请办理人可以填写验收单。")
+        _allowed(MaintenanceTask, actor, "change", current.pk)
+        return
     if order.status == "active":
         key = order.steps_snapshot[current.position]["key"] if current else None
         allowed = {"order_correction"} if material == "order" else {"report_fill"}
@@ -798,7 +896,7 @@ def check_company_form_access(order, actor, material):
                 raise PermissionDenied("只有当前填报人员可以修改工单表单。")
 
 
-def _create_company_document(order, actor, material, data, *, audit=True):
+def _create_company_document(order, actor, material, data, *, audit=True, event_details=None):
     if material == "order":
         data = {
             **data,
@@ -828,6 +926,7 @@ def _create_company_document(order, actor, material, data, *, audit=True):
         version=version,
         document_id=document.pk,
         audit=audit,
+        **(event_details or {}),
     )
     return document
 
@@ -837,6 +936,8 @@ def save_company_form(*, pk, actor, material, data):
     from .maintenance_forms import MaintenanceCompanyForm
 
     order = _order(pk, actor)
+    previous_contract = {"id": order.contract_id, "number": order.contract_number,
+                         "type": dict(order.contract_type_snapshot)}
     check_company_form_access(order, actor, material)
     if (
         material == "order"
@@ -845,11 +946,20 @@ def save_company_form(*, pk, actor, material, data):
         and isinstance(data.get("service_region"), str)
     ):
         data = {**data, "service_region": region_ids_from_names(actor, data["service_region"])}
-    form = MaintenanceCompanyForm(data, material=material, actor=actor)
+    form = MaintenanceCompanyForm(data, material=material, actor=actor, order=order)
     if not form.is_valid():
         raise ValidationError(form.errors.as_text())
     values = dict(form.cleaned_data)
     values["requested_at"] = values["requested_at"].isoformat()
+    if material == "acceptance":
+        values["settlement_amount"] = str(values["settlement_amount"])
+        from .maintenance_billing import configured, summary
+
+        if configured(order):
+            billing = summary(order, require_complete=True)
+            values["settlement_amount"] = billing["total"]
+            values["settlement_billing"] = billing
+        return _create_company_document(order, actor, material, values)
     if material == "order":
         values["signature_date"] = (
             values["signature_date"].isoformat() if values.get("signature_date") else ""
@@ -857,12 +967,18 @@ def save_company_form(*, pk, actor, material, data):
     if material == "order":
         for key in ORDER_FORM_FIELDS:
             setattr(order, key, values[key])
+        if order.status == "draft":
+            order.number = draft_number(order.number_reservation_id, order.contract_type_snapshot)
         _save(order)
         _allowed(MaintenanceOrder, actor, "change", order.pk)
         current = order.tasks.filter(status="pending").first()
         if current:
             _begin_task(current, actor)
-    return _create_company_document(order, actor, material, values)
+    return _create_company_document(order, actor, material, values, event_details={
+        "contract_before": previous_contract,
+        "contract_after": {"id": order.contract_id, "number": order.contract_number,
+                           "type": order.contract_type_snapshot},
+    })
 
 
 @transaction.atomic
@@ -870,6 +986,8 @@ def upload_document(
     *, pk, actor, material, file, state="electronic", note="", source_document_id=None,
     replaces_document_id=None, upload_mode=None,
 ):
+    if material not in dict(MATERIALS):
+        raise ValidationError("不支持上传此类材料。")
     if state not in {"electronic", "scan"}:
         raise ValidationError("材料状态仅支持 electronic（电子版）和 scan（扫描版）。")
     # Uploading may be performed by the owner or the actor of the current task.
@@ -883,9 +1001,8 @@ def upload_document(
         node = order.steps_snapshot[current.position]
         stage_material = {
             "ordering": {"order"},
-            "report": {"report"},
-            "settlement": {"settlement"},
-            "payment": {"notice", "invoice", "contract", "verification"},
+            "acceptance": {"report", "settlement", "acceptance"},
+            "payment": {"notice", "invoice"},
         }
         if material not in stage_material[order.stage]:
             raise ValidationError("只能提交当前阶段的材料，已完成阶段的材料保持不变。")
@@ -905,10 +1022,17 @@ def upload_document(
         _allowed(MaintenanceTask, actor, "change", current.pk)
         if not task_is_assigned(current, actor):
             raise PermissionDenied("只有发起流程的线路主管可以上传用印后材料。")
-    if material == "order" and not scan:
+    if material in COMPANY_FORMS and scan and not is_sealed:
+        raise ValidationError(
+            "服务工单无需上传用印前扫描件，仅可在上传用印后服务工单节点上传用印件。"
+        )
+    if material in COMPANY_FORMS and not scan:
         raise ValidationError("维护服务工单请在公司表单中填写生成，只能上传纸质或盖章扫描件。")
     source = order.documents.filter(material=material).exclude(kind="scan").first()
-    standalone_material = node.get("scan_material") if current else None
+    standalone_material = (
+        material if current and material in node.get("scan_materials", [])
+        else node.get("scan_material") if current else None
+    )
     if standalone_material and material == standalone_material:
         label = dict(MATERIALS)[material]
         if not scan:
@@ -975,9 +1099,10 @@ def upload_document(
         raise ValidationError("单份材料不能超过 20 MB。")
     version = (order.documents.filter(material=material).aggregate(n=Max("version"))["n"] or 0) + 1
     item_number = (
-        source.item_number if source and is_sealed else replaces.item_number if replaces
-        else 1 if material == "order" else
-        (order.documents.filter(material=material).aggregate(n=Max("item_number"))["n"] or 0) + 1
+        1 if material in COMPANY_FORMS else
+        source.item_number if source and is_sealed else replaces.item_number if replaces else
+        (order.documents.filter(material=material).exclude(kind="billing").aggregate(
+            n=Max("item_number"))["n"] or 0) + 1
     )
     original_name = Path(file.name).name[:255]
     document = MaintenanceDocument(
@@ -1037,8 +1162,8 @@ def upload_document_files(
     """Keep a multi-file submission atomic and clean up its storage on failure."""
     if not files:
         raise ValidationError("请至少选择一个文件。")
-    if material == "order" and len(files) != 1:
-        raise ValidationError("维护服务工单只有一份，每次只能上传一个文件。")
+    if material in COMPANY_FORMS and len(files) != 1:
+        raise ValidationError(f"{COMPANY_FORMS[material]}只有一份，每次只能上传一个文件。")
     source_document_ids = source_document_ids or [None] * len(files)
     if len(source_document_ids) != len(files):
         raise ValidationError("请为每个文件选择对应原件。")
@@ -1082,7 +1207,9 @@ def upload_material_scans(
             order = MaintenanceOrder.objects.select_for_update().get(pk=pk)
             node = order.steps_snapshot[order.current_position] if order.steps_snapshot else {}
             scan_material = node.get("scan_material")
-            if scan_material != material or node.get("key") != scan_fill_key(material):
+            if (scan_material != material and material not in node.get("scan_materials", [])) or (
+                node.get("key") != scan_fill_key(material)
+            ):
                 raise ValidationError("当前节点不能上传此扫描材料。")
             saved = upload_document_files(
                 pk=pk, actor=actor, files=files, material=material, state="scan", note=note,

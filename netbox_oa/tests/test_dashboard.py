@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from netbox_oa.dashboard import MaintenanceTodoListWidget, MaintenanceTodoWidget
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 
 class MaintenanceTodoWidgetTests(TestCase):
@@ -21,7 +22,7 @@ class MaintenanceTodoWidgetTests(TestCase):
 
     def test_pending_task_and_v2_link(self):
         self.start()
-        html = self.render_widget(self.actor)
+        html = self.render_widget(self.approver)
         self.assertIn('oa-todo-widget-count">1</span>', html)
         self.assertIn("mdi-clipboard-alert-outline", html)
         self.assertIn(reverse("plugins:netbox_oa:maintenance_workbench_v2") + "?tab=todo", html)
@@ -90,24 +91,24 @@ class MaintenanceTodoWidgetTests(TestCase):
         self.start()
         task = self.order.tasks.get(status="pending")
         other = get_user_model().objects.create_user(username="assigned_elsewhere")
-        for assignment, personal in ((None, False), (self.actor, True), (other, False)):
+        for assignment, personal in ((None, False), (self.approver, True), (other, False)):
             with self.subTest(assignment=assignment):
                 type(task).objects.filter(pk=task.pk).update(assigned_user=assignment)
                 with patch("netbox_oa.dashboard.render_to_string", return_value="") as render:
-                    self.render_widget(self.actor)
+                    self.render_widget(self.approver)
                 context = render.call_args.args[1]
                 self.assertEqual(context["pending_count"], int(personal))
                 self.assertEqual(context["delegated_count"], int(not personal))
                 self.assertTrue(context["has_pending"])
                 self.assertEqual(context["draft_count"], 0)
                 summary = InboxPresentation(
-                    [self.order], self.actor, actionable_tasks(self.actor)
+                    [self.order], self.approver, actionable_tasks(self.approver)
                 ).summary(self.order)
                 self.assertEqual(summary["status_label"], "待你审批" if personal else "可代办")
         type(task).objects.filter(pk=task.pk).update(assigned_user=None)
-        self.group.users.add(self.actor)
+        self.group.users.add(self.approver)
         with patch("netbox_oa.dashboard.render_to_string", return_value="") as render:
-            self.render_widget(self.actor)
+            self.render_widget(self.approver)
         self.assertEqual(render.call_args.args[1]["pending_count"], 1)
         self.assertEqual(render.call_args.args[1]["delegated_count"], 0)
 
@@ -134,18 +135,19 @@ class MaintenanceTodoListWidgetTests(TestCase):
         self.order.tasks.update(status="completed")
         return MaintenanceTask.objects.create(
             order=self.order, position=position, kind=node["kind"], name=node["name"],
-            assigned_user=self.actor, deadline=timezone.now(),
+            assigned_user=self.approver if node["kind"] in {"approval", "countersign"}
+            else self.actor, deadline=timezone.now(),
         )
 
     def post_task(self, task):
-        self.client.force_login(self.actor)
+        self.client.force_login(acting_user(self, task))
         return self.client.post(reverse(
             "plugins:netbox_oa:maintenancetask_quick_complete", args=[task.pk],
         ), {"comment": "客户端不应控制自动意见"})
 
     def test_list_shows_number_requester_and_disables_signature_step(self):
         self.start()
-        html = self.render_widget(self.actor)
+        html = self.render_widget(self.approver)
         self.assertIn(self.order.number, html)
         self.assertIn(self.actor.username, html)
         self.assertIn("disabled title=", html)
@@ -156,9 +158,14 @@ class MaintenanceTodoListWidgetTests(TestCase):
         from netbox_oa.models import MaintenanceEvent
 
         self.start()
-        for key, comment in (("order_department_seal", "同意"), ("order_seal", "已用印")):
+        for key, comment in (
+            ("order_senior_seal", "同意"), ("order_seal", "已用印"),
+            ("acceptance_seal", "已用印"),
+        ):
             with self.subTest(key=key):
                 task = self.set_node(key)
+                html = self.render_widget(acting_user(self, task))
+                self.assertNotIn("disabled title=", html)
                 with patch(
                     "netbox_oa.maintenance_services._materials", return_value={},
                 ) as materials:
@@ -168,7 +175,7 @@ class MaintenanceTodoListWidgetTests(TestCase):
                 task.refresh_from_db()
                 self.assertEqual(task.status, "completed")
                 self.assertEqual(task.comment, comment)
-                self.assertEqual(task.decided_by, self.actor)
+                self.assertEqual(task.decided_by, acting_user(self, task))
                 self.assertEqual(
                     MaintenanceEvent.objects.get(task=task, action="complete").details["comment"],
                     comment,
@@ -178,8 +185,8 @@ class MaintenanceTodoListWidgetTests(TestCase):
     def test_input_upload_and_signature_steps_cannot_be_bypassed(self):
         self.start()
         for key in (
-            "order_correction", "order_review", "order_final", "order_scan_fill",
-            "order_sealed_upload", "report_fill", "settlement_fill", "payment_plan", "payment_eip",
+            "order_correction", "order_review", "order_final",
+            "order_sealed_upload", "acceptance_apply", "payment_plan", "payment_eip",
         ):
             with self.subTest(key=key):
                 task = self.set_node(key)
@@ -189,14 +196,16 @@ class MaintenanceTodoListWidgetTests(TestCase):
 
     def test_missing_materials_still_block_quick_complete(self):
         self.start()
-        task = self.set_node("order_seal")
-        html = self.render_widget(self.actor)
-        self.assertIn("已用印", html)
-        self.assertNotIn("disabled title=", html)
-        response = self.post_task(task)
-        self.assertEqual(response.status_code, 400)
-        task.refresh_from_db()
-        self.assertEqual(task.status, "pending")
+        for key in ("order_seal", "acceptance_seal"):
+            with self.subTest(key=key):
+                task = self.set_node(key)
+                html = self.render_widget(self.actor)
+                self.assertIn("已用印", html)
+                self.assertNotIn("disabled title=", html)
+                response = self.post_task(task)
+                self.assertEqual(response.status_code, 400)
+                task.refresh_from_db()
+                self.assertEqual(task.status, "pending")
 
     def test_assignment_permissions_and_stale_order(self):
         from django.contrib.auth import get_user_model

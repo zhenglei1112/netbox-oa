@@ -4,11 +4,6 @@ from .maintenance_flow import FLOW_NAME
 
 menu_items = (
     PluginMenuItem(
-        link="plugins:netbox_oa:maintenance_v3_list",
-        link_text="维护服务工单 v3",
-        permissions=["netbox_oa.view_maintenanceorder"],
-    ),
-    PluginMenuItem(
         link="plugins:netbox_oa:maintenance_flow_definition",
         link_text=FLOW_NAME,
         permissions=["netbox_oa.view_maintenanceorder"],

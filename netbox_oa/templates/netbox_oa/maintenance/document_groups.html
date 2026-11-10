@@ -1,0 +1,8 @@
+{% for group in groups %}
+<div class="oa-document-category mb-3" data-document-category="{{ group.key }}">
+  <h4 class="h5 mb-2">{{ group.name }}</h4>
+  <div class="oa-document-grid{% if current_only %} oa-current-materials{% endif %}">
+    {% for material in group.materials %}{% include 'netbox_oa/maintenance/inbox_material_card.html' %}{% endfor %}
+  </div>
+</div>
+{% endfor %}

@@ -8,7 +8,7 @@ test('embedded upload reports its material heading and follows content height ch
   const messages = [];
   let changed;
   let height = 380;
-  const page = {dataset: {uploadHeading: 'Y-GD20260024 · 服务结算单'},
+  const page = {dataset: {uploadHeading: 'Y-GD261103B · 服务结算单'},
     getBoundingClientRect: () => ({height})};
   const input = {files: [], setCustomValidity() {}, addEventListener() {}};
   const drop = {querySelector: () => input, addEventListener() {}};
@@ -27,7 +27,7 @@ test('embedded upload reports its material heading and follows content height ch
       observe(element) {assert.equal(element, page);}
     },
   });
-  assert.equal(messages[0].data.title, 'Y-GD20260024 · 服务结算单');
+  assert.equal(messages[0].data.title, 'Y-GD261103B · 服务结算单');
   assert.equal(messages[0].data.height, 380);
   assert.equal(messages[0].origin, 'https://oa.test');
   height = 560;

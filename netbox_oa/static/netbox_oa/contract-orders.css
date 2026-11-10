@@ -14,6 +14,18 @@
 #oa-contract-dialog iframe { flex: 1; width: 100%; min-height: 0; border: 0; }
 #oa-contract-dialog [hidden] { display: none; }
 
+/* Preserve intrinsic button sizes and identical gaps as table contents change. */
+.oa-contract-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: .25rem;
+  white-space: nowrap;
+}
+.oa-contract-row-actions > * { flex: none; }
+.oa-contract-row-actions > form { display: flex; margin: 0; }
+
 /* Use the workbench's detailed approval UI with spacing suited to its iframe. */
 .oa-contract-flow {
   display: flex;
@@ -26,10 +38,10 @@
 .oa-contract-flow .oa-flow-legend { gap: 12px; font-size: .75rem; }
 .oa-contract-flow .oa-panel-body { padding: 8px 12px; }
 .oa-contract-flow .oa-approval-flow .oa-flow-svg {
-  width: min(100%, 1100px);
-  min-width: 900px;
+  width: 100%;
+  min-width: 0;
   margin-inline: auto;
 }
-.oa-contract-flow .oa-approval-records { margin: 10px 4px; }
-.oa-contract-flow .oa-approval-records > h3 { padding: 8px 0; }
+.oa-contract-flow .oa-approval-records { margin: 0 4px; }
+.oa-contract-flow .oa-approval-records > h3 { padding: 4px 0; }
 .oa-contract-flow .oa-record-timeline { --oa-record-node-width: 190px; }

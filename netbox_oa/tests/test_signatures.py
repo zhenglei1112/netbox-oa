@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 from netbox_oa import maintenance_services as services
 from netbox_oa import maintenance_signatures as signatures
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 
 def image_data(blank=False):
@@ -38,7 +39,8 @@ class SignatureTests(TestCase):
 
     def session(self):
         self.reach("order_review")
-        return signatures.create_session(pk=self.current().pk, actor=self.actor)
+        self.actor = acting_user(self)
+        return signatures.create_session(pk=self.current().pk, actor=acting_user(self))
 
     def url(self, name, **kwargs):
         return reverse("plugins:netbox_oa:maintenance_signature" + name, kwargs=kwargs)
@@ -75,7 +77,7 @@ class SignatureTests(TestCase):
         session.refresh_from_db()
         self.assertEqual(bytes(saved.image), bytes(session.image))
         signatures.cancel_signature(pk=session.pk, actor=self.actor)
-        next_session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        next_session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         next_url = self.url("_mobile", token=signatures.mobile_token(next_session))
         self.assertNotContains(phone.get(next_url), "使用已保存签名")
         desktop = Client(enforce_csrf_checks=True)
@@ -95,7 +97,7 @@ class SignatureTests(TestCase):
         desktop.force_login(other)
         self.assertEqual(desktop.post(action_url, {"operation": "reuse"}).status_code, 403)
         signatures.cancel_signature(pk=next_session.pk, actor=self.actor)
-        next_session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        next_session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         next_url = self.url("_mobile", token=signatures.mobile_token(next_session))
         # A different account's saved ink must never appear in this grant.
         saved.signer = other
@@ -176,7 +178,7 @@ class SignatureTests(TestCase):
             ).status_code,
             403,
         )
-        other = signatures.create_session(pk=session.task_id, actor=self.actor)
+        other = signatures.create_session(pk=session.task_id, actor=acting_user(self))
         other_url = self.url("_mobile", token=signatures.mobile_token(other))
         self.assertEqual(
             phone.post(
@@ -191,10 +193,10 @@ class SignatureTests(TestCase):
         token = signatures.mobile_token(session)
         with self.assertRaises(ValidationError):
             signatures.capture_signature(token=token + "x", data_url=image_data())
-        signatures.create_session(pk=session.task_id, actor=self.actor)
+        signatures.create_session(pk=session.task_id, actor=acting_user(self))
         with self.assertRaises(ValidationError):
             signatures.capture_signature(token=token, data_url=image_data())
-        session = signatures.create_session(pk=session.task_id, actor=self.actor)
+        session = signatures.create_session(pk=session.task_id, actor=acting_user(self))
         session.expires_at = timezone.now() - timedelta(seconds=1)
         session.save()
         with self.assertRaises(ValidationError):
@@ -231,13 +233,14 @@ class SignatureTests(TestCase):
         self.assertEqual(client.get(self.url("", pk=session.pk)).status_code, 403)
         self.assertEqual(client.get(self.url("_image", pk=session.pk)).status_code, 404)
 
-    def test_only_ordering_nodes_support_signatures(self):
-        self.reach("report_fill")
+    def test_payment_nodes_do_not_support_signatures(self):
+        self.reach("payment_plan")
         with self.assertRaises(ValidationError):
-            signatures.create_session(pk=self.current().pk, actor=self.actor)
+            signatures.create_session(pk=self.current().pk, actor=acting_user(self))
 
     def test_widget_json_add_delete_and_approve_uploaded_signature(self):
         self.reach("order_review")
+        self.actor = acting_user(self)
         desktop = Client(enforce_csrf_checks=True)
         desktop.force_login(self.actor)
         page = desktop.get(self.order.get_absolute_url())
@@ -395,7 +398,8 @@ class SignatureTests(TestCase):
 
     def test_department_review_signature_and_confirmation_expiry(self):
         self.reach("order_final")
-        session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        self.actor = acting_user(self)
+        session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
         signatures.confirm_signature(pk=session.pk, actor=self.actor)
         session.expires_at = timezone.now() - timedelta(seconds=1)
@@ -409,7 +413,9 @@ class SignatureTests(TestCase):
         from rest_framework.test import APIClient
 
         self.reach("order_review")
-        services.return_task(pk=self.current().pk, actor=self.actor, comment="修正工单")
+        services.return_task(
+            pk=self.current().pk, actor=acting_user(self), comment="修正工单",
+        )
         document = self.upload("order")
         self.client.force_login(self.actor)
         page = self.client.get(self.order.get_absolute_url())
@@ -417,17 +423,17 @@ class SignatureTests(TestCase):
         self.assertContains(page, "申请人须完成手写签名")
         self.assertEqual(document.form_data["signature"], "")
         with self.assertRaisesMessage(ValidationError, "请先由申请人完成手写签名"):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
+            services.complete_task(pk=self.current().pk, actor=acting_user(self))
         api = APIClient()
         api.force_authenticate(self.actor)
         url = f"/api/maintenance/tasks/{self.current().pk}/complete/"
         self.assertEqual(api.post(url, {}, format="json").status_code, 400)
-        session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
         response = api.post(url, {}, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["evidence"]["signature"]["image_id"], session.pk)
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
         printed = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
@@ -436,18 +442,20 @@ class SignatureTests(TestCase):
 
     def test_applicant_signature_must_be_replaced_after_revision_or_deletion(self):
         self.reach("order_review")
-        services.return_task(pk=self.current().pk, actor=self.actor, comment="修正工单")
+        services.return_task(
+            pk=self.current().pk, actor=acting_user(self), comment="修正工单",
+        )
         self.upload("order")
-        session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+        session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
         self.upload("order")
         with self.assertRaisesMessage(ValidationError, "表单版本已变化"):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
-        session = signatures.create_session(pk=self.current().pk, actor=self.actor)
+            services.complete_task(pk=self.current().pk, actor=acting_user(self))
+        session = signatures.create_session(pk=self.current().pk, actor=acting_user(self))
         with self.assertRaisesMessage(ValidationError, "请先完成手机签名"):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
+            services.complete_task(pk=self.current().pk, actor=acting_user(self))
         signatures.cancel_signature(pk=session.pk, actor=self.actor)
         with self.assertRaisesMessage(ValidationError, "请先由申请人完成手写签名"):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
+            services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.complete()
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")

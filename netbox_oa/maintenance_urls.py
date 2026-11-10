@@ -1,11 +1,27 @@
 from django.urls import path
+from netbox.views import generic
 
 from . import contract_views
+from . import maintenance_billing_views as billing_views
 from . import maintenance_signature_views as signatures
-from . import maintenance_v3 as v3
 from . import maintenance_views as views
+from .models import MaintenanceOrder
 
 urlpatterns = [
+    path("maintenance/orders/<int:pk>/settlement-billing/new/",
+         billing_views.SettlementBillingCreateView.as_view(), name="settlement_billing_create"),
+    path("maintenance/orders/<int:pk>/settlement-billing/",
+         billing_views.SettlementBillingListView.as_view(), name="settlement_billing_list"),
+    path("maintenance/materials/<int:pk>/billing/",
+         billing_views.SettlementBillingEditView.as_view(), name="settlement_billing_edit"),
+    path(
+        "maintenance/orders/<int:pk>/changelog/",
+        generic.ObjectChangeLogView.as_view(
+            base_template="netbox_oa/maintenance/changelog.html"
+        ),
+        kwargs={"model": MaintenanceOrder},
+        name="maintenanceorder_changelog",
+    ),
     path(
         "maintenance/tasks/<int:pk>/quick-complete/",
         views.MaintenanceTaskQuickCompleteView.as_view(),
@@ -15,27 +31,6 @@ urlpatterns = [
         "contracts/<int:contract_id>/orders/<int:pk>/payments/",
         contract_views.ContractOrderPaymentsView.as_view(),
         name="contract_order_payments",
-    ),
-    path("maintenance/v3/", v3.MaintenanceV3ListView.as_view(), name="maintenance_v3_list"),
-    path(
-        "maintenance/v3/orders/add/", v3.MaintenanceV3EditView.as_view(),
-        name="maintenance_v3_add",
-    ),
-    path(
-        "maintenance/v3/orders/<int:pk>/", v3.MaintenanceV3DetailView.as_view(),
-        name="maintenance_v3_detail",
-    ),
-    path(
-        "maintenance/v3/orders/<int:pk>/edit/", v3.MaintenanceV3EditView.as_view(),
-        name="maintenance_v3_edit",
-    ),
-    path(
-        "maintenance/v3/orders/<int:pk>/forms/<str:material>/",
-        v3.MaintenanceV3CompanyFormView.as_view(), name="maintenance_v3_company_form",
-    ),
-    path(
-        "maintenance/v3/orders/<int:pk>/signature/",
-        v3.MaintenanceV3DraftSignatureView.as_view(), name="maintenance_v3_draft_signature",
     ),
     path(
         "contracts/<int:contract_id>/orders/<int:pk>/flow/",
@@ -49,7 +44,7 @@ urlpatterns = [
     ),
     path(
         "maintenance/v2/",
-        views.MaintenanceWorkbenchV2View.as_view(),
+        views.MaintenanceWorkbenchView.as_view(),
         name="maintenance_workbench_v2",
     ),
     path(

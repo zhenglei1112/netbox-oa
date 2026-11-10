@@ -8,7 +8,7 @@
     <img data-signature-image {% if detail.mobile_signature.uploaded_at %}src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=detail.mobile_signature.pk %}"{% endif %} alt="你的手写签名">
     <button type="button" class="btn btn-ghost-danger oa-signature-delete" data-signature-delete aria-label="删除签名" title="删除签名">×</button>
   </span>
-  <p class="text-danger mb-0" data-signature-feedback role="alert"></p>
+  <p class="text-danger mb-0" data-signature-feedback data-oa-notice="danger" role="alert"></p>
   <dialog class="oa-signature-dialog" data-signature-dialog aria-label="添加签名">
     <button type="button" class="btn btn-ghost-secondary oa-signature-close" data-signature-close aria-label="关闭二维码">×</button>
     <img data-signature-qr alt="签字二维码" width="220" height="220">

@@ -14,13 +14,14 @@ from django.db import transaction
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
+from .maintenance_materials import ACCEPTANCE_SIGNING_NODES, TASK_SIGNING_NODES
 from .models import MaintenanceSavedSignature, MaintenanceSignature
 from .services import _allowed
 
 SIGNING_SALT = "netbox_oa.mobile_signature"
 SIGNING_SECONDS = 900
 SUBMISSION_SALT = "netbox_oa.mobile_signature_submission"
-SIGNING_NODES = {"order_correction", "order_review", "order_final"}
+SIGNING_NODES = TASK_SIGNING_NODES
 
 
 @contextmanager
@@ -51,9 +52,9 @@ def capture_audit_actor(actor):
         current_request.reset(token)
 
 
-def order_form(order):
+def order_form(order, material="order"):
     latest = order.documents.filter(
-        material="order", removed_at__isnull=True
+        material=material, removed_at__isnull=True
     ).order_by("-version").first()
     source = latest.source_document if latest and latest.kind == "scan" else latest
     if not source or source.kind != "form":
@@ -61,8 +62,15 @@ def order_form(order):
     return source
 
 
+def task_form(task):
+    material = "acceptance" if task.order.steps_snapshot[task.position]["key"] in (
+        ACCEPTANCE_SIGNING_NODES
+    ) else "order"
+    return order_form(task.order, material)
+
+
 def validate_session(session):
-    from .maintenance_services import task_is_assigned
+    from .maintenance_services import check_self_approval, task_is_assigned
 
     task, actor = session.task, session.signer
     order = session.document.order
@@ -95,9 +103,10 @@ def validate_session(session):
             and actor.pk != order.requester_id
         )
         or not task_is_assigned(task, actor)
-        or order_form(order).pk != session.document_id
+        or task_form(task).pk != session.document_id
     ):
         raise ValidationError("签字链接已失效，请在电脑端重新生成二维码。")
+    check_self_approval(order, task, actor)
     _allowed(type(task), actor, "change", task.pk)
     _allowed(type(order), actor, "view", order.pk)
     _allowed(type(session.document), actor, "view", session.document_id)
@@ -151,17 +160,18 @@ def session_from_token(token, *, lock=False):
 
 @transaction.atomic
 def create_session(*, pk, actor):
-    from .maintenance_services import _begin_task, _event, _task
+    from .maintenance_services import _begin_task, _event, _task, check_self_approval
 
     order, task = _task(pk, actor)
+    check_self_approval(order, task, actor)
     if order.steps_snapshot[task.position]["key"] not in SIGNING_NODES:
-        raise ValidationError("仅工单修正、工单初审和工单部门审核支持手机签字。")
+        raise ValidationError("当前节点不支持手机签字。")
     if (
         order.steps_snapshot[task.position]["key"] in {"order_correction"}
         and actor.pk != order.requester_id
     ):
         raise PermissionDenied("工单修正必须由申请人本人签名。")
-    document = order_form(order)
+    document = task_form(task)
     _allowed(type(document), actor, "view", document.pk)
     _begin_task(task, actor)
     task.signatures.filter(cancelled=False).update(cancelled=True)
@@ -288,15 +298,19 @@ def confirm_signature(*, pk, actor):
 
 
 def signature_for_approval(task, actor, *, required=False):
-    signer = task.order.requester if required else actor
+    key = task.order.steps_snapshot[task.position]["key"]
+    signer = task.order.requester if key == "order_correction" else actor
     session = task.signatures.filter(signer=signer, cancelled=False).order_by("-pk").first()
     if session is None:
         if required:
-            raise ValidationError("请先由申请人完成手写签名后再提交工单。")
+            raise ValidationError(
+                "请先由申请人完成手写签名后再提交工单。" if key == "order_correction"
+                else "请先完成本环节手写签名后再提交。"
+            )
         return None
     if not session.uploaded_at or not session.image:
         raise ValidationError("请先完成手机签名，或删除本次签名请求。")
-    if order_form(task.order).pk != session.document_id:
+    if task_form(task).pk != session.document_id:
         raise ValidationError("表单版本已变化，请重新签名。")
     # Clicking the approval action confirms the displayed handwriting. Mobile
     # upload alone still cannot approve a task or publish a printable signature.

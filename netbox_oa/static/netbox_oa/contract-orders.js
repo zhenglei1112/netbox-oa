@@ -1,7 +1,7 @@
 (() => {
   const section = document.getElementById('oa-contract-orders');
   if (section) {
-    // The contract plugin exposes only a bottom slot. Move this card before payments,
+    // The contract plugin exposes only a bottom slot. Move this card after payments,
     // identifying the native add-invoice link, or its heading for view-only users.
     const headers = [...document.querySelectorAll('.card-header')];
     const paymentHeader = headers.find(header => {
@@ -13,8 +13,35 @@
       return addLink || /^(付款|Invoices|Payments)$/.test(heading);
     });
     const paymentBlock = paymentHeader?.closest('.row') || paymentHeader?.closest('.card');
-    paymentBlock?.before(section);
+    paymentBlock?.after(section);
     const paymentCard = paymentHeader?.closest('.card');
+    // Native contract/fault tables and asynchronously replaced order rows use
+    // different action markup. Keep their standard buttons in one shared layout.
+    function alignRowActions() {
+      [paymentCard, section, document.getElementById('contract_otn_faults')]
+        .filter(Boolean).forEach(card => {
+          card.querySelectorAll('td.noprint').forEach(cell => {
+            if (!cell.querySelector('.btn')) return;
+            let group = cell.querySelector('.oa-contract-row-actions');
+            if (!group) {
+              group = document.createElement('div');
+              group.className = 'oa-contract-row-actions';
+              group.append(...cell.childNodes);
+              cell.append(group);
+            }
+            group.querySelectorAll('.btn').forEach(button => {
+              button.classList.remove('btn-sm', 'btn-lg', 'btn-icon');
+              if (button.classList.contains('dropdown-toggle')) {
+                button.classList.add('dropdown-toggle-split');
+                button.style.removeProperty('padding-left');
+              }
+            });
+          });
+        });
+    }
+    alignRowActions();
+    const actionObserver = new MutationObserver(alignRowActions);
+    actionObserver.observe(document.body, {childList: true, subtree: true});
     if (paymentCard) {
       const results = document.createElement('div');
       [...paymentCard.children].filter(child => child !== paymentHeader)
@@ -109,7 +136,7 @@
           filterUrl = url;
           window.htmx?.process(results);
         } catch (error) {
-          if (error.name !== 'AbortError') window.alert('付款筛选失败或无权查看，请重试。');
+          if (error.name !== 'AbortError') window.oaNotify?.('付款筛选失败或无权查看，请重试。');
         } finally {
           if (pending === controller) {
             results.removeAttribute('aria-busy');
@@ -169,7 +196,9 @@
     clearTimeout(timer);
     frame.hidden = true;
     status.hidden = false;
-    status.textContent = '加载失败或无权查看，请关闭后重试。';
+    window.oaNotify?.('加载失败或无权查看，请关闭后重试。');
+    status.textContent = '';
+    status.hidden = true;
   }
   document.addEventListener('click', event => {
     const link = event.target.closest('[data-oa-contract-open]');

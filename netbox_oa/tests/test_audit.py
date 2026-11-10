@@ -1,3 +1,4 @@
+
 """Operation coverage and the native ObjectChange adapter contract.
 
 The standalone harness substitutes NetBox's base model. The adapter tests patch only
@@ -30,6 +31,7 @@ from netbox_oa.models import (
     MaintenanceTask,
 )
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 
 def native_change(obj, action):
@@ -176,7 +178,7 @@ class MaintenanceAuditTests(TestCase):
         self.assertEqual(saved[-1][1], "保存表单")
 
     def test_upload_replace_and_delete_log_every_affected_document_version(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first = self.upload("report")
         revised = services.upload_document(
             pk=self.order.pk, actor=self.actor, material="report", state="scan",
@@ -212,7 +214,9 @@ class MaintenanceAuditTests(TestCase):
         self.assertEqual(event.details["comment"], comment)
         self.assertEqual(event.details["target_user"], target.pk)
         self.assertEqual(event.operation_summary, "批转流程")
-        services.complete_task(pk=task.pk, actor=self.actor, comment="同意办理")
+        self.grant(target, "maintenancedocument", "view")
+        test_maintenance.sign_task(task, target)
+        services.complete_task(pk=task.pk, actor=target, comment="同意办理")
         event = self.order.events.filter(action="complete").first()
         self.assertEqual(event.details["comment"], "同意办理")
         self.assertEqual(event.task.comment, "同意办理")
@@ -229,20 +233,22 @@ class MaintenanceAuditTests(TestCase):
             if instance.pk == task.pk:
                 baselines.append(deepcopy(instance._prechange_snapshot))
 
+        test_maintenance.sign_task(task, acting_user(self))
+        task.refresh_from_db()
         with patch.object(ChangeLoggedModel, "snapshot", snapshot):
             post_save.connect(capture, sender=MaintenanceTask)
             try:
-                services.complete_task(pk=task.pk, actor=self.actor, comment="已核实")
+                services.complete_task(pk=task.pk, actor=acting_user(self), comment="已核实")
             finally:
                 post_save.disconnect(capture, sender=MaintenanceTask)
         self.assertEqual(len(baselines), 2)
-        self.assertIsNone(baselines[0]["started_at"])
+        self.assertIsNotNone(baselines[0]["started_at"])
         self.assertIsNotNone(baselines[1]["started_at"])
         self.assertEqual(baselines[1]["status"], "pending")
         self.assertEqual(baselines[1]["comment"], "")
 
     def test_material_preview_and_download_do_not_add_native_or_business_audit_noise(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = self.upload("report")
         before = self.order.events.count()
         with self.native_changes() as changes:

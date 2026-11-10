@@ -20,8 +20,8 @@ function element(dataset = {}, classes = '') {
     getBoundingClientRect: () => ({top: 0, bottom: 40}),
   };
 }
-function setup(types = ['download', 'download', 'download']) {
-  const stream = element({selected: '1', material: 'order', orderNumber: 'Y-001'});
+function setup(types = ['download', 'download', 'download'], selection = {}) {
+  const stream = element({selected: '1', material: 'order', orderNumber: 'Y-001', ...selection});
   stream.clientHeight = 600;
   stream.scrollTop = 0;
   stream.scrollHeight = 1000;
@@ -36,7 +36,7 @@ function setup(types = ['download', 'download', 'download']) {
       title: `Material ${i + 1}`, source: `/file/${i + 1}`});
     article.content = element();
     article.querySelector = () => article.content;
-    article.hidden = i !== 0;
+    article.hidden = article.dataset.document !== stream.dataset.selected;
     return article;
   });
   const files = articles.map(article => {
@@ -81,6 +81,16 @@ function setup(types = ['download', 'download', 'download']) {
 
   };
 }
+
+test('an empty document category does not fall back to a different category', async () => {
+  const page = setup(undefined, {selected: '', category: 'sealed'});
+  await page.settle();
+  assert.ok(page.articles.every(article => article.hidden));
+  assert.ok(page.files.every(link => !link.hasAttribute('aria-current')));
+  await page.click(page.files[0]);
+  await page.settle();
+  assert.equal(page.articles[0].hidden, false);
+});
 
 test('preview leaves wheel and keyboard scrolling entirely to the browser', async () => {
   const page = setup();

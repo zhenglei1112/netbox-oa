@@ -1,5 +1,12 @@
-<div class="d-flex justify-content-end gap-1">
+<div class="oa-contract-row-actions">
   {% if perms.netbox_contract.view_invoice %}<button type="button" class="btn btn-outline-primary position-relative" data-oa-payment-filter data-oa-payment-url="{% url 'plugins:netbox_oa:contract_order_payments' contract_id=record.contract_id pk=record.pk %}" title="筛选对应付款和故障" aria-label="筛选 {{ record.number }} 对应付款和故障"><i class="mdi mdi-filter-outline" aria-hidden="true"></i><span class="spinner-border spinner-border-sm htmx-indicator oa-payment-filter-indicator position-absolute top-50 start-50 translate-middle" role="status" aria-label="正在筛选对应付款和故障"></span></button>{% endif %}
   <a class="btn btn-outline-primary" data-oa-contract-open href="{% url 'plugins:netbox_oa:contract_order_flow' contract_id=record.contract_id pk=record.pk %}" title="查看办理流程" aria-label="查看 {{ record.number }} 办理流程"><i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i></a>
   <a class="btn btn-outline-info" data-oa-contract-open href="{% url 'plugins:netbox_oa:contract_order_materials' contract_id=record.contract_id pk=record.pk %}" title="查看材料" aria-label="查看 {{ record.number }} 材料"><i class="mdi mdi-file-document-outline" aria-hidden="true"></i></a>
+  <span class="btn-group dropdown">
+    <a class="btn btn-warning" href="{% url 'plugins:netbox_oa:maintenanceorder' pk=record.pk %}" title="编辑" aria-label="编辑 {{ record.number }}，进入工单办理"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+    <button type="button" class="btn btn-warning dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false" aria-label="展开 {{ record.number }} 操作菜单"><span class="visually-hidden">展开操作菜单</span></button>
+    <ul class="dropdown-menu dropdown-menu-end">
+      <li><a class="dropdown-item" href="{% url 'plugins:netbox_oa:maintenanceorder_changelog' pk=record.pk %}"><i class="mdi mdi-history" aria-hidden="true"></i> Changelog</a></li>
+    </ul>
+  </span>
 </div>

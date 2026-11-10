@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from qrcode.image.svg import SvgPathImage
 
 from . import maintenance_signatures as signing
+from .maintenance_services import SelfApprovalDenied
 from .models import MaintenanceSavedSignature, MaintenanceSignature, MaintenanceTask
 from .services import _allowed
 
@@ -68,6 +69,10 @@ class SignatureCreateView(LoginRequiredMixin, View):
         task = get_object_or_404(MaintenanceTask, pk=pk)
         try:
             signature = signing.create_session(pk=pk, actor=request.user)
+        except SelfApprovalDenied as error:
+            if wants_json(request):
+                return JsonResponse({"error": str(error)}, status=403)
+            raise
         except ValidationError as error:
             if wants_json(request):
                 return JsonResponse({"error": "；".join(error.messages)}, status=400)

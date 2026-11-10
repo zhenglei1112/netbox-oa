@@ -1,6 +1,7 @@
 from netbox.plugins import PluginConfig
 
 __version__ = "0.2.1"
+DEFAULT_CONTRACT_TYPE_NUMBER_CODES = {"1": "W", "2": "K", "3": "D"}
 
 
 class NetBoxOAConfig(PluginConfig):
@@ -13,7 +14,10 @@ class NetBoxOAConfig(PluginConfig):
     max_version = "4.6.99"
     django_apps = ["django_fsm_log"]
     default_auto_field = "django.db.models.BigAutoField"
-    default_settings = {"contract_service_region_field": "ProvincesOfResources"}
+    default_settings = {
+        "contract_service_region_field": "ProvincesOfResources",
+        "contract_type_number_codes": DEFAULT_CONTRACT_TYPE_NUMBER_CODES,
+    }
 
     def ready(self):
         super().ready()

@@ -6,7 +6,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from netbox_oa import maintenance_services as services
-from netbox_oa.maintenance_flow import ROLES
+from netbox_oa.maintenance_contracts import order_object_links
+from netbox_oa.maintenance_flow import MATERIALS, ROLES
 from netbox_oa.models import (
     MaintenanceDocument,
     MaintenanceOrder,
@@ -47,6 +48,11 @@ class PolicyWriteSerializer(serializers.Serializer):
 
 
 class OrderSerializer(ValidatedModelSerializer):
+    current_contract_type = serializers.SerializerMethodField()
+
+    def get_current_contract_type(self, obj):
+        return order_object_links(obj, self.context["request"].user)["current_contract_type"]
+
     contract_id = serializers.IntegerField(min_value=1)
     service_region_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1), required=False, allow_empty=False
@@ -72,6 +78,9 @@ class OrderSerializer(ValidatedModelSerializer):
             "supplier",
             "contract_number",
             "contract_id",
+            "contract_type_snapshot",
+            "number_type_snapshot",
+            "current_contract_type",
             "service_region",
             "service_region_ids",
             "service_location",
@@ -89,6 +98,8 @@ class OrderSerializer(ValidatedModelSerializer):
         )
         read_only_fields = (
             "number",
+            "contract_type_snapshot",
+            "number_type_snapshot",
             "supplier",
             "contract_number",
             "service_region",
@@ -151,6 +162,7 @@ class DocumentSerializer(ValidatedModelSerializer):
             "original_name",
             "kind",
             "form_data",
+            "billing_data",
             "source_document",
             "uploaded_task",
             "is_sealed",
@@ -167,9 +179,7 @@ class DocumentWriteSerializer(serializers.Serializer):
     upload_mode = serializers.ChoiceField(choices=("new", "replace"), required=False)
     source_document_id = serializers.IntegerField(min_value=1, required=False)
     order_id = serializers.IntegerField(min_value=1)
-    material = serializers.ChoiceField(
-        choices=MaintenanceDocument._meta.get_field("material").choices
-    )
+    material = serializers.ChoiceField(choices=MATERIALS)
     state = serializers.ChoiceField(
         choices=MaintenanceDocument._meta.get_field("state").choices, default="electronic"
     )

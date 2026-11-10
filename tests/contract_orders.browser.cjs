@@ -36,7 +36,7 @@ const python = process.env.PYTHON || path.resolve(
     await page.getByRole('heading', {name: '服务工单', exact: true}).waitFor();
     assert.ok(await page.locator('#oa-contract-orders').evaluate(node =>
       Boolean(node.compareDocumentPosition(document.querySelector('#payments')) &
-        Node.DOCUMENT_POSITION_FOLLOWING)));
+        Node.DOCUMENT_POSITION_PRECEDING)));
     assert.equal(await page.locator('#oa-contract-orders thead th').last().textContent(), '');
     const firstRow = page.locator('#oa-contract-orders tbody tr').first();
     assert.match(await firstRow.locator('td').nth(5).innerText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);

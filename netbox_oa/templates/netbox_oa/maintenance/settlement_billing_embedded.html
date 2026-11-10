@@ -1,0 +1,21 @@
+{% load static %}
+<!doctype html><html lang="zh-CN" class="oa-billing-embedded"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>维护计费明细</title>
+  <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox.css' %}">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-billing-modal.css' %}?v=20261110-1">
+</head><body>
+  <main data-billing-editor>
+    <p class="text-muted">{{ document.order.number }} · 费用明细</p>
+    <form action="" method="post">{% csrf_token %}
+      {% include 'netbox_oa/maintenance/settlement_billing_fields.html' %}
+      <div class="d-flex justify-content-end gap-2 pt-3">
+        <a class="btn btn-outline-secondary" data-billing-cancel href="{{ return_url }}">取消</a>
+        <button class="btn btn-primary" type="submit" {% if not rules %}disabled{% endif %}>保存</button>
+      </div>
+    </form>
+  </main>
+  <script src="{% static 'netbox_oa/maintenance-billing-embed.js' %}?v=20261106-2" defer></script>
+</body></html>

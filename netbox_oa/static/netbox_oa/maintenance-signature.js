@@ -49,13 +49,14 @@
       ctx.clearRect(0,0,canvas.width,canvas.height); ink = false; pointer = null;
     });
     form.addEventListener('submit', event => {
-      if (!ink) {event.preventDefault(); form.querySelector('[data-canvas-error]').textContent = '请先书写完整名字。'; return;}
+      if (!ink) {event.preventDefault(); window.oaNotify?.('请先书写完整名字。'); return;}
       form.elements.image_data.value = canvas.toDataURL('image/png');
       form.querySelector('button[type=submit]').disabled = true;
     });
   }
   const panel = document.querySelector('[data-signature-status]');
   if (panel) {
+    let lastState;
     const poll = async () => {
       try {
         const response = await fetch(panel.dataset.signatureStatus, {credentials:'same-origin', cache:'no-store'});
@@ -63,16 +64,21 @@
         const {state} = await response.json();
         const uploaded = state === 'uploaded' || state === 'confirmed';
         panel.querySelector('[data-signature-confirm]').disabled = !uploaded;
-        panel.querySelector('[data-signature-message]').textContent = {
+        const text = {
           waiting:'等待手机提交签名……', uploaded:'签名已上传，请核对后确认。',
           confirmed:'已确认签名。', invalid:'签字链接已失效，请返回工单重新生成二维码。'
         }[state];
+        if (lastState !== state) window.oaNotify?.(text, state === 'invalid' ? 'danger' : 'info');
+        lastState = state;
         if (uploaded) {
           const image = panel.querySelector('[data-signature-preview]');
           if (image.hidden) {image.src += '?preview=1'; image.hidden = false;}
         }
         if (state !== 'waiting') return;
-      } catch (_) {panel.querySelector('[data-signature-message]').textContent = '连接中断，正在重试……';}
+      } catch (_) {
+        if (lastState !== 'offline') window.oaNotify?.('连接中断，正在重试……');
+        lastState = 'offline';
+      }
       setTimeout(poll, 3000);
     };
     poll();

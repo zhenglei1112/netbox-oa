@@ -83,11 +83,11 @@ test('modal uses the material heading, has no close button, and fits its content
   page.window.oaOpenUpload('/upload/1/');
   const layout = height => page.handlers.message({
     origin: 'https://oa.test', source: page.frame().contentWindow,
-    data: {type: 'oa-upload-layout', title: 'Y-GD20260024 · 服务结算单', height},
+    data: {type: 'oa-upload-layout', title: 'Y-GD261103B · 服务结算单', height},
   });
   layout(360);
   assert.equal(page.elements.find(item => item.tag === 'strong').textContent,
-    'Y-GD20260024 · 服务结算单');
+    'Y-GD261103B · 服务结算单');
   assert.equal(page.elements.some(item => item.tag === 'button'), false);
   assert.equal(page.frame().style.height, '360px');
   assert.equal(page.dialog().style.height, '414px');

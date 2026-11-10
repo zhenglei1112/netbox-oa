@@ -2,5 +2,5 @@
         {% if detail.can_mobile_sign %}{% include 'netbox_oa/maintenance/signature_widget.html' %}{% endif %}
         {% if detail.current.kind == 'external' %}{{ action_form.external_reference.as_field_group }}{% endif %}
         {% if detail.payment_contract_stage %}
-          {% if detail.payment_contract_url %}<a class="btn btn-ghost-primary" href="{{ detail.payment_contract_url }}">付款信息</a>{% else %}<button class="btn btn-ghost-primary" type="button" disabled>付款信息</button><p>{{ detail.payment_contract_error }}</p>{% endif %}
+          {% if detail.payment_contract_url %}<a class="btn btn-ghost-primary" href="{{ detail.payment_contract_url }}">付款信息</a>{% else %}<button class="btn btn-ghost-primary" type="button" disabled>付款信息</button><p data-oa-notice="warning">{{ detail.payment_contract_error }}</p>{% endif %}
         {% endif %}

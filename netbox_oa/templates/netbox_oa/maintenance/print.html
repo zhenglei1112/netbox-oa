@@ -1,27 +1,31 @@
 {% load static oa_filters %}
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<head>
+{% include 'netbox_oa/inc/notifications.html' %}<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ document.get_material_display }} {{ data.number }} v{{ document.version }}</title>
   <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
   <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261018-3">
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261110-3">
   <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261021-1" defer></script>
 </head>
 <body data-audit-url="{% url 'plugins:netbox_oa:maintenance_print_event' pk=document.pk %}" data-csrf-token="{{ csrf_token }}">
-{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ print_return_url|default:document.order.get_absolute_url }}">返回工单 / 上传扫描件</a><span>表单 v{{ document.version }} · 签字盖章后上传对应扫描件</span></nav>{% endif %}
+{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ print_return_url|default:document.order.get_absolute_url }}">返回工单 / 上传扫描件</a></nav>{% endif %}
 <main class="print-sheet {% if document.material == 'report' %}report-sheet{% else %}order-sheet{% endif %}">
   {% if document.material == 'order' %}
     <h1>中交信通光缆及相关机房环境设备<br>维护服务工单</h1>
-  {% else %}<h1>服务报告</h1>{% endif %}
-  {% if document.material == 'order' %}
+  {% elif document.material == 'acceptance' %}<h1>工单验收单</h1>{% else %}<h1>服务报告</h1>{% endif %}
+  {% if document.material == 'order' or document.material == 'acceptance' %}
   <div class="order-number-block" style="--barcode-width:{{ barcode_width }}">
     <p class="document-number" aria-label="{{ data.number }}">{% for character in data.number %}<span>{{ character }}</span>{% endfor %}</p>
     <template class="print-code-template"><div class="order-machine-code"><img src="{{ order_barcode }}" alt="工单编号条形码 {{ data.number }}"></div></template>
   </div>
   {% else %}<p class="document-number">{{ data.number }}</p>{% endif %}
-  <table class="document-table"><colgroup>{% if document.material == 'order' %}<col style="width:15%"><col style="width:35%"><col style="width:15%"><col style="width:35%">{% else %}<col style="width:17%"><col style="width:33%"><col style="width:17%"><col style="width:33%">{% endif %}</colgroup><tbody>
+  {% if document.material == 'acceptance' %}
+  {% include 'netbox_oa/maintenance/acceptance_print_table.html' %}
+  {% else %}
+  <table class="document-table"><colgroup>{% if document.material == 'order' or document.material == 'acceptance' %}<col style="width:15%"><col style="width:35%"><col style="width:15%"><col style="width:35%">{% else %}<col style="width:17%"><col style="width:33%"><col style="width:17%"><col style="width:33%">{% endif %}</colgroup><tbody>
     {% if document.material == 'report' %}<tr><th colspan="4" class="section-heading">甲方填写</th></tr>{% endif %}
     <tr><th>{% if document.material == 'report' %}申请时间{% else %}发起日期{% endif %}</th><td class="latin-text">{{ requested_at|oa_datetime }}</td><th>{% if document.material == 'report' %}申请人员{% else %}发起人{% endif %}</th><td>{{ data.applicant }}</td></tr>
     {% if document.material == 'order' %}<tr><th>联系电话</th><td class="latin-text">{{ data.contact_phone }}</td><th>紧急程度</th><td>{{ priority_label }}</td></tr>{% endif %}
@@ -31,7 +35,7 @@
     {% if document.material == 'order' %}
       <tr class="requirements-row"><th>服务要求</th><td colspan="3" class="requirements">{{ data.requirements|linebreaksbr }}</td></tr>
       <tr class="applicant-row"><th>申请人</th><td>{% if signatures.applicant.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.applicant.image_id %}" alt="{{ signatures.applicant.name }}的手写签名">{% else %}{{ signatures.applicant.name|default:data.signature }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.applicant.date|default:data.signature_date|oa_datetime|default:'____-__-__' }}</td></tr>
-      <tr class="applicant-row"><th>初审</th><td>{% if signatures.order_review.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_review.image_id %}" alt="{{ signatures.order_review.name }}的手写签名">{% else %}{{ signatures.order_review.name }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.order_review.date|oa_datetime|default:'____-__-__' }}</td></tr>
+      <tr class="applicant-row"><th>复核</th><td>{% if signatures.order_review.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_review.image_id %}" alt="{{ signatures.order_review.name }}的手写签名">{% else %}{{ signatures.order_review.name }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.order_review.date|oa_datetime|default:'____-__-__' }}</td></tr>
       <tr class="applicant-row"><th>部门审核</th><td>{% if signatures.order_final.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_final.image_id %}" alt="{{ signatures.order_final.name }}的手写签名">{% else %}{{ signatures.order_final.name }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.order_final.date|oa_datetime|default:'____-__-__' }}</td></tr>
       <tr class="seal-row"><td colspan="4" class="seal-cell"><div class="seal-block"><strong>甲方：{{ data.company_name }}</strong><strong>盖章：</strong><strong class="seal-date">日期：</strong></div><template class="print-code-template"><a class="verification-code" href="{{ verification_url }}"><img src="{{ verification_qr }}" alt="工单信息核验二维码"></a></template></td></tr>
     {% else %}
@@ -47,6 +51,7 @@
       <tr><td colspan="2" class="signature">维护单位（盖章）：<br><br>维护人员：<br>日期：</td><td colspan="2" class="signature">甲方单位（盖章）：{{ data.company_name }}<br><br>验收人员：<br>日期：</td></tr>
     {% endif %}
   </tbody></table>
+  {% endif %}
   {% if document.material == 'report' %}<p class="attachment-note">※附件：现场故障、处理照片（带定位、时间水印）</p>{% endif %}
 </main>
 </body></html>

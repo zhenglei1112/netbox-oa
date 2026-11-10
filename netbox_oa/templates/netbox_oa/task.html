@@ -1,6 +1,7 @@
 {% extends 'generic/object.html' %}
 {% block subtitle %}{% include 'netbox_oa/inc/object_timestamps.html' %}{% endblock %}
 {% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}
 <div class="card mb-3">
   <h2 class="card-header">{{ object.name }}</h2>
   <div class="card-body">

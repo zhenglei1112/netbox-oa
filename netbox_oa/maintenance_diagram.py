@@ -1,4 +1,4 @@
-"""Layout the sequential definition as four SVG stage lanes."""
+"""Lay out the supplied definition or order snapshot as SVG stage lanes."""
 
 from textwrap import wrap
 

@@ -38,7 +38,7 @@ class MaterialItemTests(TestCase):
         with CaptureQueriesContext(connection) as compact:
             detail = presentation(self.order, self.actor, materials_only=True)
         self.assertLess(len(compact), len(full))
-        self.assertEqual(len(detail["materials"]), 7)
+        self.assertEqual(len(detail["materials"]), 6)
         self.client.force_login(self.actor)
         workbench = self.client.get(self.order.get_absolute_url())
         self.assertContains(workbench, 'aria-label="材料目录"')
@@ -54,7 +54,7 @@ class MaterialItemTests(TestCase):
         self.reach("payment_eip")
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
-        for material in ("notice", "invoice", "contract", "verification"):
+        for material in ("notice", "invoice"):
             with self.subTest(material=material):
                 document = self.upload(material)
                 self.assertFalse(document.is_sealed)
@@ -73,6 +73,75 @@ class MaterialItemTests(TestCase):
                 ))
         self.complete()
         self.assertFalse(self.order.tasks.filter(status="pending").exists())
+
+    def test_retired_payment_materials_cannot_be_uploaded(self):
+        from netbox_oa.api.maintenance import DocumentWriteSerializer
+        from netbox_oa.maintenance_forms import MaintenanceDocumentForm
+
+        self.reach("payment_eip")
+        self.client.force_login(self.actor)
+        api_choices = DocumentWriteSerializer().fields["material"].choices
+        form_choices = dict(MaintenanceDocumentForm().fields["material"].choices)
+        for material in ("contract", "verification"):
+            with self.subTest(material=material):
+                self.assertNotIn(material, api_choices)
+                self.assertNotIn(material, form_choices)
+                with self.assertRaisesMessage(ValidationError, "不支持上传此类材料"):
+                    self.upload(material)
+                response = self.client.get(reverse(
+                    "plugins:netbox_oa:maintenance_material_upload",
+                    args=[self.order.pk, material],
+                ))
+                self.assertEqual(response.status_code, 404)
+        self.assertFalse(self.order.documents.filter(
+            material__in=("contract", "verification"),
+        ).exists())
+
+    def test_retired_payment_requirements_are_removed_but_history_is_preserved(self):
+        from importlib import import_module
+        from types import SimpleNamespace
+
+        from django.apps import apps
+
+        self.reach("payment_eip")
+        self.order.refresh_from_db()
+        step = self.order.steps_snapshot[self.current().position]
+        step["required"].extend([["contract", "electronic"], ["verification", "electronic"]])
+        original_steps = self.order.steps_snapshot.copy()
+        self.order.save()
+        historical = MaintenanceDocument.objects.create(
+            order=self.order, material="contract", kind="attachment", state="electronic",
+            version=1, original_name="old-contract.pdf", file="old-contract.pdf",
+            uploaded_by=self.actor,
+        )
+        migrate = import_module(
+            "netbox_oa.migrations.0028_remove_obsolete_payment_requirements"
+        ).remove_obsolete_payment_requirements
+        schema_editor = SimpleNamespace(connection=connection)
+        migrate(apps, schema_editor)
+        migrate(apps, schema_editor)
+        self.order.refresh_from_db()
+        self.assertEqual(
+            self.order.steps_snapshot[self.current().position]["required"],
+            [["notice", "electronic"], ["invoice", "electronic"]],
+        )
+        historical.refresh_from_db()
+        self.assertEqual(historical.file.name, "old-contract.pdf")
+        self.assertIn("合同复印件", historical.short_name)
+        self.client.force_login(self.actor)
+        response = self.client.get(reverse(
+            "plugins:netbox_oa:maintenance_review", args=[self.order.pk],
+        ), {"material": "contract"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["selected_group"]["can_upload"])
+        self.assertEqual(response.context["selected_group"]["documents"], [historical])
+
+        MaintenanceOrder.objects.filter(pk=self.order.pk).update(
+            status="completed", steps_snapshot=original_steps,
+        )
+        migrate(apps, schema_editor)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.steps_snapshot, original_steps)
 
     def test_existing_active_payment_snapshot_gains_verification_once(self):
         from importlib import import_module
@@ -103,14 +172,15 @@ class MaterialItemTests(TestCase):
         self.assertEqual(self.order.steps_snapshot[self.current().position]["required"], [])
 
     def test_order_has_one_logical_scan_and_preserves_prior_revisions(self):
-        self.reach("order_scan_fill")
-        first = self.upload("order", "scan")
-        second = self.upload("order", "scan")
+        self.reach("order_sealed_upload")
+        first = self.upload("order", "scan", sealed=True)
+        second = self.upload("order", "scan", sealed=True)
         self.assertEqual((first.item_number, second.item_number), (1, 1))
-        self.assertEqual(second.replaces_document_id, first.pk)
+        self.assertEqual(second.source_document_id, first.source_document_id)
         order = MaintenanceOrder.objects.get(pk=self.order.pk)
-        self.assertEqual(list(services.material_scan_sources(order, "order")), [second])
-        with self.assertRaisesMessage(ValidationError, "维护服务工单只有一份"):
+        self.assertEqual(list(services.material_scan_sources(order, "order")),
+                         [first.source_document])
+        with self.assertRaisesMessage(ValidationError, "当前节点不能上传此扫描材料"):
             services.upload_material_scans(
                 pk=order.pk, actor=self.actor, material="order",
                 files=[SimpleUploadedFile("one.pdf", b"scan"),
@@ -128,7 +198,7 @@ class MaterialItemTests(TestCase):
         self.assertTrue(rejected.context["form"].errors)
 
     def test_each_report_is_independent_and_update_keeps_its_number(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first, other = self.upload("report"), self.upload("report")
         self.assertNotEqual(first.item_number, other.item_number)
         revised = services.upload_document(
@@ -147,50 +217,9 @@ class MaterialItemTests(TestCase):
                 replaces_document_id=first.pk,
             )
 
-    def test_sealing_links_to_exact_approved_revision_and_shows_both_files(self):
-        self.reach("settlement_fill")
-        first = self.upload("settlement")
-        revised = services.upload_document(
-            pk=self.order.pk, actor=self.actor, material="settlement", state="scan",
-            file=SimpleUploadedFile("revised.pdf", b"scan"), upload_mode="replace",
-            replaces_document_id=first.pk,
-        )
-        while (
-            self.order.steps_snapshot[self.current().position]["key"] != "settlement_sealed_upload"
-        ):
-            self.complete()
-        with self.assertRaisesMessage(ValidationError, "必须对应本次审批"):
-            services.upload_document(
-                pk=self.order.pk, actor=self.actor, material="settlement", state="scan",
-                source_document_id=first.pk, file=SimpleUploadedFile("wrong.pdf", b"scan"),
-            )
-        sealed = services.upload_document(
-            pk=self.order.pk, actor=self.actor, material="settlement", state="scan",
-            source_document_id=revised.pk, file=SimpleUploadedFile("sealed.pdf", b"scan"),
-        )
-        self.assertEqual(sealed.item_number, revised.item_number)
-        self.assertEqual(sealed.source_document_id, revised.pk)
-        self.client.force_login(self.actor)
-        response = self.client.get(reverse("plugins:netbox_oa:maintenance_review",
-                                           args=[self.order.pk]), {"material": "settlement"})
-        self.assertEqual(response.context["selected_group"]["documents"], [sealed, revised])
-        self.assertEqual(response.context["selected"], sealed)
-        self.assertContains(response, f"对应审批件 v{revised.version}")
-        self.assertContains(response, revised.short_name)
-        self.assertContains(response, sealed.short_name)
-        self.assertNotContains(response, revised.display_name)
-        self.assertNotContains(response, sealed.display_name)
-        self.assertEqual(response.context["selected_group"]["item_count"], 1)
-        with self.assertRaisesMessage(ValidationError, "重复关联"):
-            services.upload_document_files(
-                pk=self.order.pk, actor=self.actor, material="settlement", state="scan",
-                files=[SimpleUploadedFile("one.pdf", b"scan"),
-                       SimpleUploadedFile("two.pdf", b"scan")],
-                source_document_ids=[revised.pk, revised.pk],
-            )
 
     def test_new_and_update_are_explicit_in_the_upload_form(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first, other = self.upload("report"), self.upload("report")
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_material_upload",
@@ -212,50 +241,11 @@ class MaterialItemTests(TestCase):
         active = list(services.material_scan_sources(order, "report"))
         self.assertEqual({doc.replaces_document_id for doc in active}, {first.pk, other.pk})
 
-    def test_review_index_pairs_each_item_and_keeps_order_form_on_same_row(self):
-        self.reach("report_fill")
-        first, other = self.upload("report"), self.upload("report")
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
-            self.complete()
-        sealed = services.upload_document(
-            pk=self.order.pk, actor=self.actor, material="report", state="scan",
-            source_document_id=other.pk, file=SimpleUploadedFile("sealed.pdf", b"scan"),
-        )
-        self.client.force_login(self.actor)
-        url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
-        response = self.client.get(url, {"material": "report", "document": first.pk})
-        rows = response.context["selected_group"]["index_rows"]
-        self.assertEqual([row["label"] for row in rows], ["第 1 份", "第 2 份"])
-        self.assertEqual([entry["document"] for entry in rows[0]["files"]], [first])
-        self.assertEqual([entry["document"] for entry in rows[1]["files"]], [sealed, other])
-        self.assertEqual([entry["label"] for entry in rows[1]["files"]], ["用印后", "审批件"])
-        self.assertContains(response, f'aria-label="服务报告 第 1 份 审批件 v{first.version}"')
-        self.assertEqual(response.context["selected"], first)
-        report_items = [item for item in response.context["review_items"]
-                        if item["group"]["key"] == "report"]
-        self.assertEqual([item["document"] for item in report_items], [first, sealed, other])
-        self.assertEqual([item["type"] for item in report_items], ["pdf", "pdf", "pdf"])
-        self.assertEqual([item["document"] for item in report_items if item["preferred"]],
-                         [first, sealed])
-        self.assertEqual([item["item_id"] for item in report_items],
-                         [first.pk, sealed.pk, sealed.pk])
-        for document in [first, sealed, other]:
-            self.assertContains(response, f'id="review-document-{document.pk}"')
-        self.assertContains(response, 'aria-label="材料预览"')
-        from netbox_oa.tests.test_inbox import PanelMarkup
-        markup = PanelMarkup(response.content.decode())
-        visible_documents = [attrs for tag, attrs in markup.elements
-                             if tag == "article" and "hidden" not in attrs]
-        self.assertEqual([attrs["data-document"] for attrs in visible_documents], [str(first.pk)])
-        order_group = next(group for group in response.context["groups"] if group["key"] == "order")
-        self.assertEqual(len(order_group["index_rows"]), 1)
-        self.assertEqual([entry["label"] for entry in order_group["index_rows"][0]["files"]],
-                         ["用印后", "审批件", "电子版"])
 
     def test_review_hides_single_item_labels_across_workbenches_and_contract_embed(self):
         from netbox_oa.tests.test_inbox import PanelMarkup
 
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first = self.upload("report")
         self.client.force_login(self.actor)
         review_url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
@@ -264,7 +254,6 @@ class MaterialItemTests(TestCase):
         })
         entries = [(review_url, {"embed": "1"}),
                    (review_url, {"embed": "1", "ui": "v2"}),
-                   (review_url, {"ui": "v3"}),
                    (contract_url, {"embed": "1"})]
         for multiple in (False, True):
             if multiple:
@@ -286,11 +275,11 @@ class MaterialItemTests(TestCase):
                     order_group = next(group for group in response.context["groups"]
                                        if group["key"] == "order")
                     self.assertEqual(len(order_group["index_rows"]), 1)
-                    self.assertEqual(len(order_group["documents"]), 3)
+                    self.assertEqual(len(order_group["documents"]), 2)
                     self.assertEqual(len(file_links), sum(len(group["documents"])
                                                          for group in response.context["groups"]))
                     self.assertContains(
-                        response, f'aria-label="服务报告 第 1 份 审批件 v{first.version}"'
+                        response, f'aria-label="服务报告 第 1 份 扫描件 v{first.version}"'
                     )
                     if multiple:
                         self.assertContains(response, '>第 1 份</a>')
@@ -298,44 +287,9 @@ class MaterialItemTests(TestCase):
                     else:
                         self.assertNotContains(response, '>第 1 份</a>')
 
-    def test_review_defaults_to_first_item_before_file_priority(self):
-        self.client.force_login(self.actor)
-        url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
-        draft = self.client.get(url, {"material": "order", "embed": "1"})
-        self.assertEqual(draft.context["selected"].kind, "form")
-        self.reach("report_fill")
-        first, second = self.upload("report"), self.upload("report")
-        while self.order.steps_snapshot[self.current().position]["key"] != "report_sealed_upload":
-            self.complete()
-        second_sealed = services.upload_document(
-            pk=self.order.pk, actor=self.actor, material="report", state="scan",
-            source_document_id=second.pk, file=SimpleUploadedFile("second.pdf", b"scan"),
-        )
-        page = self.client.get(url, {"material": "report", "embed": "1"})
-        self.assertEqual(page.context["selected"], first)
-        rows = page.context["selected_group"]["index_rows"]
-        self.assertEqual([row["default_document"] for row in rows], [first, second_sealed])
-        from netbox_oa.tests.test_inbox import PanelMarkup
-
-        links = [attrs for tag, attrs in PanelMarkup(page.content.decode()).elements
-                 if tag == "a" and "material-row-link" in attrs.get("class", "")]
-        report_links = [link for link in links if "material=report&" in link["href"]]
-        self.assertEqual([link["href"] for link in report_links], [
-            f"?embed=1&material=report&document={first.pk}",
-            f"?embed=1&material=report&document={second_sealed.pk}",
-        ])
-        first_sealed = services.upload_document(
-            pk=self.order.pk, actor=self.actor, material="report", state="scan",
-            source_document_id=first.pk, file=SimpleUploadedFile("first.pdf", b"scan"),
-        )
-        self.assertEqual(self.client.get(url, {"material": "report"}).context["selected"],
-                         first_sealed)
-        self.assertEqual(self.client.get(url, {
-            "material": "report", "document": second_sealed.pk,
-        }).context["selected"], second_sealed)
 
     def test_uploaded_storage_and_download_names_are_normalized_original_is_preserved(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = services.upload_document(
             pk=self.order.pk, actor=self.actor, material="report", state="scan",
             file=SimpleUploadedFile("supplier-file.PDF", b"scan"),
@@ -351,7 +305,7 @@ class MaterialItemTests(TestCase):
         download.close()
 
     def test_invalid_batch_revision_rolls_back_all_new_versions(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first, other = self.upload("report"), self.upload("report")
         before = self.order.documents.count()
         with self.assertRaises(ValidationError):
@@ -371,7 +325,8 @@ class MaterialItemMigrationTests(TransactionTestCase):
 
     def setUp(self):
         # Other migration tests intentionally leave the schema at their target version.
-        MigrationExecutor(connection).migrate([("netbox_oa", "0023_document_removed_at")])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes("netbox_oa"))
         test_maintenance.MaintenanceTests.setUp(self)
 
     def test_existing_files_keep_storage_and_gain_item_and_revision_links(self):
@@ -414,4 +369,5 @@ class MaterialItemMigrationTests(TransactionTestCase):
             self.assertEqual(linked.source_document_id, reports[1].pk)
             self.assertEqual(linked.file.name, "stamped.pdf")
         finally:
-            MigrationExecutor(connection).migrate([("netbox_oa", "0023_document_removed_at")])
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes("netbox_oa"))

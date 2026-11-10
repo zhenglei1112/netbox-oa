@@ -2,6 +2,7 @@
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views import View
 from django_tables2 import RequestConfig
@@ -29,6 +30,19 @@ class ObjectView(BaseObjectView):
             "object": instance, "actions": (),
             **self.get_extra_context(request, instance),
         })
+
+
+class ObjectChangeLogView(LoginRequiredMixin, View):
+    """URL and object-permission stand-in; NetBox owns changelog rendering."""
+
+    base_template = None
+
+    def get(self, request, model, **kwargs):
+        meta = model._meta
+        if not request.user.has_perm(f"{meta.app_label}.view_{meta.model_name}"):
+            raise PermissionDenied
+        get_object_or_404(model.objects.restrict(request.user, "view"), **kwargs)
+        return HttpResponse(status=204)
 
 
 class ObjectListView(BaseObjectView):

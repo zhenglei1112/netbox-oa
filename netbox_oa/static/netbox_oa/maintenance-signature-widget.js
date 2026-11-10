@@ -54,12 +54,16 @@
       }
       if (status === 'invalid') {
         stop(widget);
-        widget.querySelector('[data-signature-hint]').textContent = '二维码已失效，请关闭后重新添加签名。';
+        window.oaNotify?.('二维码已失效，请关闭后重新添加签名。');
         return;
       }
+      state.lastError = '';
       widget.querySelector('[data-signature-hint]').textContent = '扫描二维码，添加签名';
     } catch (error) {
-      if (!state.stopped) widget.querySelector('[data-signature-hint]').textContent = error.message;
+      if (!state.stopped && state.lastError !== error.message) {
+        state.lastError = error.message;
+        window.oaNotify?.(error.message);
+      }
     }
     if (!state.stopped) state.timer = setTimeout(() => poll(widget, state), 2000);
   };
@@ -96,7 +100,7 @@
         widget.querySelector('[data-signature-dialog]').close();
         delete widget.dataset.actionUrl;
       }
-    } catch (error) {feedback.textContent = error.message;}
+    } catch (error) {window.oaNotify?.(error.message);}
     finally {button.disabled = false;}
   });
   document.addEventListener('input', event => {

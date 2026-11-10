@@ -1,3 +1,4 @@
+
 """The current workflow is the only supported runtime contract."""
 
 from django.core.exceptions import ValidationError
@@ -13,6 +14,7 @@ from netbox_oa.maintenance_flow import ROLES, build_steps
 from netbox_oa.maintenance_forms import MaintenanceActionForm
 from netbox_oa.models import MaintenanceOrder
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 REMOVED_PAYMENT_FIELDS = {
     "payment_amount",
@@ -36,7 +38,7 @@ class CurrentFlowTests(TestCase):
     def test_only_current_roles_nodes_and_flags_are_built(self):
         self.assertEqual(set(dict(ROLES)), {"reviewer", "department", "senior", "seal"})
         nodes = build_steps({}, 24)
-        self.assertEqual(sum(not node.get("return_only") for node in nodes), 20)
+        self.assertEqual(sum(not node.get("return_only") for node in nodes), 14)
         self.assertFalse(
             {"order_fill", "paid", "receipt", "issue", "invoice_check"}
             & {node["key"] for node in nodes}
@@ -48,12 +50,11 @@ class CurrentFlowTests(TestCase):
         )
         self.assertEqual(self.policy.roles.count(), 4)
         self.start()
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
 
-    def test_seal_then_requester_upload_for_all_three_materials(self):
+    def test_seal_then_requester_upload_for_both_company_forms(self):
         self.start()
-        for material, label in (("order", "服务工单"), ("report", "服务报告"),
-                                ("settlement", "服务结算单")):
+        for material, label in (("order", "服务工单"), ("acceptance", "验收单")):
             while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_seal":
                 self.complete()
             seal_task = self.current()
@@ -67,7 +68,7 @@ class CurrentFlowTests(TestCase):
             self.assertEqual(upload_task.assigned_user_id, self.order.requester_id)
             self.assertIsNone(upload_task.assigned_group_id)
             with self.assertRaisesMessage(ValidationError, "用印扫描件"):
-                services.complete_task(pk=upload_task.pk, actor=self.actor)
+                services.complete_task(pk=upload_task.pk, actor=acting_user(self))
             stamped = self.upload(material, "scan", sealed=True)
             self.assertTrue(stamped.is_sealed)
             self.assertEqual(stamped.uploaded_task_id, upload_task.pk)
@@ -96,7 +97,8 @@ class CurrentFlowTests(TestCase):
         )
 
     def test_old_material_states_are_rejected_by_service_api_and_web(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
+        started_at = self.current().started_at
         api = APIClient()
         api.force_authenticate(self.actor)
         self.client.force_login(self.actor)
@@ -134,10 +136,10 @@ class CurrentFlowTests(TestCase):
                 )
                 self.assertEqual(response.status_code, 302)
         self.assertFalse(self.order.documents.filter(material="report").exists())
-        self.assertIsNone(self.current().started_at)
+        self.assertEqual(self.current().started_at, started_at)
 
     def test_old_batch_upload_flag_does_not_upload_materials(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         self.client.force_login(self.actor)
         self.client.post(
             reverse("plugins:netbox_oa:maintenance_upload", args=[self.order.pk]),
@@ -226,4 +228,5 @@ class CurrentFlowMigrationTests(TransactionTestCase):
                 }
             self.assertFalse(REMOVED_PAYMENT_FIELDS & fields)
         finally:
-            MigrationExecutor(connection).migrate([("netbox_oa", "0023_document_removed_at")])
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes("netbox_oa"))

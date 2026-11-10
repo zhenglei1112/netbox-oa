@@ -5,6 +5,12 @@
   const contracts = JSON.parse(options.textContent);
   const update = (contractChanged = false) => {
     const contract = contracts[select.value] || {};
+    const number = document.getElementById('id_number');
+    if (number?.dataset?.numberBase && number.dataset.numberFixed !== '1') {
+      const base = number.dataset.numberBase;
+      const code = contract.contract_type_snapshot?.code || '';
+      number.value = base.slice(0, 8) + code + base.slice(8);
+    }
     const supplier = document.getElementById('id_supplier');
     if (supplier) supplier.value = contract.supplier || '';
     const region = document.getElementById('id_service_region');

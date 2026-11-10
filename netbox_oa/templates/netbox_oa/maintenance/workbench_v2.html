@@ -1,30 +1,32 @@
 {% extends 'base/layout.html' %}
 {% load static oa_filters %}
-{% block title %}工单办理 v2{% endblock %}
+{% block title %}工单办理{% endblock %}
 {% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload-modal.css' %}">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload.css' %}">
 <script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}?v=20261023-3">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261018-1">
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-v2.css' %}?v=20261022-3">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261105-2">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-v2.css' %}?v=20261105-1">
 <div class="oa-workbench oa-inbox oa-industrial oa-v2 {% if mobile_detail %}oa-show-detail{% endif %}" data-detail-url="{{ detail_url }}" data-list-url="{{ list_url }}">
+  <div class="oa-upload-loading" data-oa-navigation-loading role="status" aria-label="正在加载工单" hidden><span class="spinner-border text-primary" aria-hidden="true"></span></div>
   <header class="oa-heading">
-    <div><h1>工单办理 <span class="badge bg-primary text-white">v2</span></h1></div>
+    <div><h1>工单办理</h1></div>
     <div class="btn-list">
-      <a class="btn btn-ghost-primary" data-oa-version-switch href="{{ version_switch_url }}">返回原版办理</a>
-      {% if perms.netbox_oa.add_maintenanceorder %}<a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_add' %}?ui=v2">＋ 发起维护服务工单</a>{% endif %}
+      {% if perms.netbox_oa.add_maintenanceorder %}<a class="btn btn-ghost-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_add' %}">＋ 发起维护服务工单</a>{% endif %}
     </div>
   </header>
-  <div class="oa-feedback" role="status" aria-live="polite">{% for message in messages %}<p>{{ message }}</p>{% endfor %}</div>
+  <div class="oa-feedback" role="status" aria-live="polite">{% for message in messages %}<p{% if "oa-task-completed" in message.tags %} data-oa-task-completed{% endif %}>{{ message }}</p>{% endfor %}</div>
   <div class="oa-columns">
     <section class="card oa-list" aria-label="工单列表">
       <nav class="oa-tabs" aria-label="工单范围">
-        {% for item in tabs %}<a data-oa-nav class="{% if tab == item.key %}active{% endif %}" {% if tab == item.key %}aria-current="page"{% endif %} href="{{ item.url }}">{{ item.label }}</a>{% endfor %}
+        {% for item in tabs %}<a data-oa-nav class="{% if tab == item.key %}active{% endif %}" {% if tab == item.key %}aria-current="page"{% endif %} href="{{ item.url }}">{{ item.label }} <span class="oa-tab-count">{{ item.count }}</span></a>{% endfor %}
       </nav>
       <form method="get" action="{{ workbench_url }}" class="oa-filters">
-        <input type="hidden" name="ui" value="v2"><input type="hidden" name="tab" value="{{ tab }}">
+        <input type="hidden" name="tab" value="{{ tab }}">
         <input type="search" class="form-control" name="q" value="{{ q }}" placeholder="快速搜索工单号、服务单位、合同" aria-label="快速搜索工单" autocomplete="off">
         <noscript><button type="submit" class="btn btn-ghost-primary">搜索</button></noscript>
       </form>
@@ -54,11 +56,11 @@
           {% if request.user.is_superuser and detail.order.status == 'active' %}<a class="btn btn-ghost-danger" data-oa-open="terminate" href="{{ detail_url }}&amp;panel=terminate" title="终止工单" aria-label="终止工单"><i class="mdi mdi-stop-circle-outline" aria-hidden="true"></i></a>{% endif %}
         </div>
       </header>
-      {% if outside_list %}<p class="oa-notice">该工单不在当前筛选范围。</p>{% endif %}
+      {% if outside_list %}<p class="oa-notice" data-oa-notice="info">该工单不在当前筛选范围。</p>{% endif %}
       <ol class="oa-v2-stages" aria-label="工单阶段">
         {% for stage in guide.stages %}<li class="{{ stage.state }}" {% if stage.state == 'current' %}aria-current="step"{% endif %}><span>{{ forloop.counter }}</span>{{ stage.label }}{% if stage.state == 'current' %}<small>当前</small>{% endif %}</li>{% endfor %}
       </ol>
-      {% if action_error %}<div class="oa-action-error" role="alert">{{ action_error }}{% if not detail.can_act and action_form.is_bound %}<p>你填写的意见：{{ action_form.comment.value|default:'（未填写）' }}</p>{% endif %}</div>{% endif %}
+      {% if action_error %}<div class="oa-action-error" data-oa-notice="danger" role="alert">{{ action_error }}{% if not detail.can_act and action_form.is_bound %}<p>你填写的意见：{{ action_form.comment.value|default:'（未填写）' }}</p>{% endif %}</div>{% endif %}
       <section class="oa-v2-guide" aria-label="本环节办理提醒">
         <header class="oa-v2-guide-heading"><strong>{% if detail.current %}{{ detail.current.name }}{% else %}{{ detail.order.get_status_display }}{% endif %}</strong><span class="oa-v2-guide-status">{{ detail.status_label }}</span></header>
         {% if guide.steps %}<div class="oa-v2-guide-body">
@@ -83,9 +85,10 @@
             {% if guide.pending_uploads %}<div class="oa-v2-reminder" role="status"><strong>待补齐本环节上传</strong><ul>{% for name in guide.pending_uploads %}<li>{{ name }}</li>{% endfor %}</ul></div>{% endif %}
             {% include 'netbox_oa/maintenance/inbox_actions.html' %}
           {% elif detail.order.status == 'draft' and detail.can_change %}
-            <p>补全工单信息并由申请人签名后，即可发起审批。</p>
-            <a class="btn btn-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}?ui=v2">编辑、签名并提交审批</a>
+            <a class="btn btn-primary" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}?return_query={{ return_query|urlencode }}">编辑、签名并提交审批</a>
             <form class="mt-3" data-oa-action method="post" action="{% url 'plugins:netbox_oa:maintenanceorder_action' pk=detail.order.pk operation='withdraw' %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"><button class="btn btn-ghost-secondary" type="submit">撤销草稿</button></form>
+          {% elif detail.self_approval_blocked %}
+            <p class="alert alert-warning" data-oa-notice="warning" role="status">不能审批自己发起的工单或验收单，请由其他审批人办理。</p>
           {% elif detail.current %}
             <p>当前由 <strong>{{ detail.waiting_for }}</strong> 办理。</p>
           {% else %}

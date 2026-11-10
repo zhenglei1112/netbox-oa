@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -16,9 +17,10 @@ from netbox_oa import maintenance_services as services
 from netbox_oa.maintenance_contracts import selected_contract
 from netbox_oa.maintenance_flow import ROLES
 from netbox_oa.maintenance_forms import MaintenanceOrderEditForm, MaintenanceOrderForm
-from netbox_oa.maintenance_numbering import issue_number, number_from_token
-from netbox_oa.models import MaintenanceNumberSequence, MaintenanceOrder
+from netbox_oa.maintenance_numbering import SALT, issue_number, number_from_token
+from netbox_oa.models import MaintenanceNumberReservation, MaintenanceOrder
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 from tests.support.contracts.models import Contract
 from tests.support.dcim.models import Region
 
@@ -57,7 +59,7 @@ class OrderingTests(TestCase):
         test_maintenance.sign_draft(order, self.actor)
         services.start_order(pk=order.pk, actor=self.actor)
         task = order.tasks.get(status="pending")
-        self.assertEqual(task.name, "工单初审")
+        self.assertEqual(task.name, "工单复核")
         self.assertEqual(order.documents.count(), 1)
 
     def test_only_enabled_policy_is_selected_by_default(self):
@@ -160,11 +162,9 @@ class OrderingTests(TestCase):
             [step["name"] for step in self.order.steps_snapshot if step["stage"] == "ordering"],
             [
                 "工单修正",
-                "工单初审",
+                "工单复核",
                 "工单部门审核",
-                "服务工单",
-                "服务工单用印部门审核",
-                "服务工单用印公司审批",
+                "工单公司审批",
                 "服务工单用印",
                 "上传用印后服务工单",
             ],
@@ -179,26 +179,29 @@ class OrderingTests(TestCase):
             self.grant(reviewer, "maintenanceorder", "view")
             self.assertEqual(task.assigned_group_id, groups[role])
             self.assertIsNone(task.assigned_user_id)
+            self.grant(reviewer, "maintenancedocument", "view")
+            signature = test_maintenance.sign_task(task, reviewer)
             services.complete_task(pk=task.pk, actor=reviewer)
             task.refresh_from_db()
             self.assertEqual(
                 task.evidence["signature"],
                 {
+                    "image_id": signature.pk,
                     "name": name,
                     "user_id": reviewer.pk,
                     "date": timezone.localdate().isoformat(),
                 },
             )
         self.order.refresh_from_db()
-        self.assertEqual(self.current().name, "服务工单")
+        self.assertEqual(self.current().name, "工单公司审批")
         self.client.force_login(self.actor)
         printed = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
         self.assertEqual(printed.context["signatures"]["order_review"]["name"], "reviewer_a")
         self.assertEqual(printed.context["signatures"]["order_final"]["name"], "reviewer_b")
-        self.assertContains(printed, "<td>reviewer_a</td>")
-        self.assertContains(printed, "<td>reviewer_b</td>")
+        self.assertContains(printed, "reviewer_a的手写签名")
+        self.assertContains(printed, "reviewer_b的手写签名")
 
     def test_members_outside_configured_group_cannot_approve(self):
         self.configure_ordering()
@@ -214,6 +217,8 @@ class OrderingTests(TestCase):
             reviewer.save()
         self.reach("order_review")
         self.assertIsNone(self.current().assigned_user_id)
+        self.grant(first, "maintenancedocument", "view")
+        test_maintenance.sign_task(self.current(), first)
         task = services.complete_task(pk=self.current().pk, actor=first)
         self.assertEqual(task.assigned_user_id, first.pk)
         self.assertIsNotNone(task.started_at)
@@ -330,7 +335,7 @@ class OrderingTests(TestCase):
         )
         test_maintenance.sign_draft(order, self.actor)
         services.start_order(pk=order.pk, actor=self.actor)
-        self.assertEqual(order.tasks.get(status="pending").name, "工单初审")
+        self.assertEqual(order.tasks.get(status="pending").name, "工单复核")
 
     def test_framework_contract_without_manual_region_has_field_error(self):
         self.contract.custom_field_data = {}
@@ -460,7 +465,7 @@ class OrderingTests(TestCase):
         page = self.client.get(url)
         form = page.context["form"]
         number = form["number"].value()
-        self.assertTrue(number.startswith("Y-GD"))
+        self.assertRegex(number, r"^Y-GD[0-9]{6}[A-E]$")
         self.assertNotIn("title", form.fields)
         self.assertTrue(form.fields["number"].disabled)
         response = self.client.post(
@@ -475,8 +480,8 @@ class OrderingTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         order = MaintenanceOrder.objects.latest("pk")
-        self.assertEqual(order.number, number)
-        self.assertEqual(str(order), number)
+        self.assertEqual(order.number, number[:8] + "A" + number[8:])
+        self.assertEqual(str(order), order.number)
 
     def test_number_token_cannot_be_forged_or_reused(self):
         self.client.force_login(self.actor)
@@ -492,19 +497,24 @@ class OrderingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(MaintenanceOrder.objects.count(), count + 1)
 
-    def test_annual_serial_numbers_increment_and_reset_for_new_year(self):
+    def test_random_numbers_include_year_month_and_reuse_tail_across_months(self):
         with patch(
-            "netbox_oa.maintenance_numbering.timezone.localdate", return_value=date(2030, 1, 1)
+            "netbox_oa.maintenance_numbering.secrets.choice", side_effect=lambda values: values[-1]
         ):
-            first, token = issue_number(self.actor)
-            second, _ = issue_number(self.actor)
-        with patch(
-            "netbox_oa.maintenance_numbering.timezone.localdate", return_value=date(2031, 1, 1)
-        ):
-            next_year, _ = issue_number(self.actor)
-        self.assertEqual(first, "Y-GD20300001")
-        self.assertEqual(second, "Y-GD20300002")
-        self.assertEqual(next_year, "Y-GD20310001")
+            with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                       return_value=date(2030, 1, 1)):
+                first, token = issue_number(self.actor)
+                second, _ = issue_number(self.actor)
+            with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                       return_value=date(2030, 2, 1)):
+                next_month, _ = issue_number(self.actor)
+            with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                       return_value=date(2031, 1, 1)):
+                next_year, _ = issue_number(self.actor)
+        self.assertEqual(first, "Y-GD300199E")
+        self.assertEqual(second, "Y-GD300198E")
+        self.assertEqual(next_month, "Y-GD300299E")
+        self.assertEqual(next_year, "Y-GD310199E")
         self.assertEqual(number_from_token(token, self.actor), first)
         other = get_user_model().objects.create_user(username="another_number_actor")
         with self.assertRaises(ValidationError):
@@ -513,15 +523,54 @@ class OrderingTests(TestCase):
     def test_reserved_number_is_not_reallocated_when_page_is_abandoned(self):
         first, _ = issue_number(self.actor)
         second, _ = issue_number(self.actor)
-        self.assertEqual(int(second[-4:]), int(first[-4:]) + 1)
-
-    def test_serial_exhaustion_displays_error_on_create_page(self):
-        MaintenanceNumberSequence.objects.update_or_create(
-            year=timezone.localdate().year, defaults={"last_value": 9999}
+        self.assertNotEqual(first, second)
+        self.assertTrue(
+            MaintenanceNumberReservation.objects.filter(number=first, used=False).exists()
         )
+
+    def test_competing_reservation_retries_without_breaking_transaction(self):
+        competing = "Y-GD300101A"
+        MaintenanceNumberReservation.objects.create(number=competing, actor=self.actor)
+        original_filter = MaintenanceNumberReservation.objects.filter
+
+        def stale_available_numbers(**kwargs):
+            queryset = original_filter(**kwargs)
+            # Simulate a reservation created after this request read the available set.
+            if "number__startswith" in kwargs:
+                return queryset.exclude(number=competing)
+            return queryset
+
+        with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                   return_value=date(2030, 1, 1)), patch(
+            "netbox_oa.maintenance_numbering.secrets.choice", side_effect=lambda values: values[0]
+        ), patch.object(MaintenanceNumberReservation.objects, "filter", stale_available_numbers):
+            number, token = issue_number(self.actor)
+        self.assertEqual(number, "Y-GD300102A")
+        self.assertEqual(number_from_token(token, self.actor), number)
+        self.assertTrue(MaintenanceNumberReservation.objects.filter(number=competing).exists())
+
+    def test_signed_tokens_reject_invalid_number_formats(self):
+        for number in ("Y-GD20260001", "Y-GD2611B03", "Y-GD2611-03B", "G-GD261103B",
+                       "Y-GD260003B", "Y-GD261303B", "Y-GD261103F", "Y-GD261100B", "Y-GD26113B"):
+            with self.subTest(number=number):
+                MaintenanceNumberReservation.objects.create(number=number, actor=self.actor)
+                token = signing.dumps({"number": number, "actor_id": self.actor.pk}, salt=SALT)
+                with self.assertRaisesMessage(ValidationError, "凭证已失效"):
+                    number_from_token(token, self.actor)
+
+    def test_monthly_number_exhaustion_displays_error_on_create_page(self):
+        today = timezone.localdate()
+        prefix = f"Y-GD{today.year % 100:02d}{today.month:02d}"
+        existing = set(MaintenanceNumberReservation.objects.values_list("number", flat=True))
+        MaintenanceNumberReservation.objects.bulk_create([
+            MaintenanceNumberReservation(number=f"{prefix}{value:02d}{letter}", actor=self.actor)
+            for letter in "ABCDE" for value in range(1, 100)
+            if f"{prefix}{value:02d}{letter}" not in existing
+        ])
         self.client.force_login(self.actor)
         page = self.client.get(reverse("plugins:netbox_oa:maintenanceorder_add"))
-        self.assertContains(page, "本年度四位工单流水号已用完")
+        self.assertContains(page, "本月工单编号已用完")
+        self.assertContains(page, "495")
 
     def test_workbench_and_api_only_use_order_number(self):
         self.client.force_login(self.actor)
@@ -583,7 +632,9 @@ class OrderingTests(TestCase):
     def test_new_revision_does_not_inherit_approval_signatures(self):
         self.reach("order_final")
         original = self.order.documents.get(material="order")
-        services.return_task(pk=self.current().pk, actor=self.actor, comment="修订服务范围")
+        services.return_task(
+            pk=self.current().pk, actor=acting_user(self), comment="修订服务范围",
+        )
         revision = self.upload("order")
         self.client.force_login(self.actor)
         old_print = self.client.get(

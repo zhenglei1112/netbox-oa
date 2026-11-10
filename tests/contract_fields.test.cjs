@@ -6,15 +6,17 @@ const {runInNewContext} = require('node:vm');
 
 const source = readFileSync(join(__dirname, '../netbox_oa/static/netbox_oa/maintenance-contract.js'), 'utf8');
 
-function page(region, preserveEmpty = false) {
+function page(region, preserveEmpty = false, fixedNumber = false) {
   const listeners = {};
   const fields = {
     'oa-contract-options': {textContent: JSON.stringify({
-      '1': {supplier: '服务单位一', service_region_ids: [1, 2]},
-      '2': {supplier: '框架合同单位', service_region_ids: []},
+      '1': {supplier: '服务单位一', service_region_ids: [1, 2], contract_type_snapshot: {code: 'W'}},
+      '2': {supplier: '框架合同单位', service_region_ids: [], contract_type_snapshot: {code: 'K'}},
     })},
     id_contract_id: {value: '1', addEventListener: (name, callback) => {listeners[name] = callback;}},
     id_supplier: {value: ''},
+    id_number: {value: fixedNumber ? 'Y-GD2611W03B' : 'Y-GD261103B',
+      dataset: {numberBase: 'Y-GD261103B', numberFixed: fixedNumber ? '1' : '0'}},
     id_service_region: {
       dataset: {oaPreserveEmpty: preserveEmpty ? '1' : ''},
       options: ['1', '2', '3'].map(value => ({value, selected: region.includes(value)})),
@@ -54,4 +56,20 @@ test('switching contracts refreshes defaults and lets a framework region be ente
   assert.deepEqual(fields.id_service_region.selectedOptions.map(option => option.value), ['3']);
   change('1');
   assert.deepEqual(fields.id_service_region.selectedOptions.map(option => option.value), ['1', '2']);
+});
+
+test('draft number preview changes only the type character and preserves the reserved month and tail', () => {
+  const {fields, change} = page([]);
+  assert.equal(fields.id_number.value, 'Y-GD2611W03B');
+  change('2');
+  assert.equal(fields.id_number.value, 'Y-GD2611K03B');
+  change('');
+  assert.equal(fields.id_number.value, 'Y-GD261103B');
+});
+
+test('submitted number remains fixed when the contract changes during correction', () => {
+  const {fields, change} = page([], false, true);
+  change('2');
+  assert.equal(fields.id_number.value, 'Y-GD2611W03B');
+  assert.equal(fields.id_supplier.value, '框架合同单位');
 });

@@ -43,7 +43,7 @@ class VerificationTests(TestCase):
         self.assertContains(response, 'class="verification-code"')
         page = self.client.get(url)
         self.assertContains(page, self.order.number)
-        self.assertContains(page, "付款申请提交不代表实际已付款")
+        self.assertNotContains(page, "付款申请提交不代表实际已付款")
         self.assertContains(page, "合同付款信息")
         self.assertContains(page, "未提交")
         self.assertIn("no-store", page["Cache-Control"])
@@ -60,7 +60,7 @@ class VerificationTests(TestCase):
         self.assertIsNotNone(payment.completed_at)
         self.assertContains(response, "付款申请已提交")
         self.assertContains(response, "EIP-TEST-001")
-        self.assertContains(response, "实际付款记录请在合同付款信息中核对")
+        self.assertContains(response, "合同付款信息")
 
     def test_verification_requires_login_and_both_order_and_document_permissions(self):
         _, url = self.urls()

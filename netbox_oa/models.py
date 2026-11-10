@@ -11,7 +11,7 @@ from django_fsm_log.decorators import fsm_log_by, fsm_log_description
 from netbox.models import ChangeLoggedModel
 
 from .choices import TaskStatus, WorkflowStatus
-from .maintenance_flow import MATERIALS, ROLES, STAGES
+from .maintenance_flow import DOCUMENT_MATERIALS, ROLES, STAGES
 from .storage import MaintenanceDocumentStorage
 from .validators import validate_payload, validate_steps
 
@@ -279,12 +279,6 @@ class MaintenanceRole(ChangeLoggedModel):
         verbose_name_plural = "维护审批角色"
 
 
-class MaintenanceNumberSequence(models.Model):
-    _netbox_private = True
-    year = models.PositiveIntegerField(primary_key=True)
-    last_value = models.PositiveIntegerField(default=0)
-
-
 class MaintenanceNumberReservation(models.Model):
     _netbox_private = True
     number = models.CharField(max_length=40, primary_key=True)
@@ -308,6 +302,12 @@ class MaintenanceChangeLogMixin:
 
 class MaintenanceOrder(MaintenanceChangeLogMixin, WorkflowStateModel):
     number = models.CharField(max_length=40, unique=True, verbose_name="工单编号")
+    number_reservation = models.OneToOneField(
+        MaintenanceNumberReservation, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="order",
+    )
+    contract_type_snapshot = models.JSONField(default=dict, blank=True)
+    number_type_snapshot = models.JSONField(default=dict, blank=True)
     policy = models.ForeignKey(MaintenancePolicy, on_delete=models.PROTECT, verbose_name="流程配置")
     requester = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -540,7 +540,7 @@ class MaintenanceGroupReservation(models.Model):
 
 class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="documents")
-    material = models.CharField(max_length=20, choices=MATERIALS)
+    material = models.CharField(max_length=20, choices=DOCUMENT_MATERIALS)
     version = models.PositiveIntegerField()
     item_number = models.PositiveIntegerField(default=0, editable=False)
     removed_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -554,9 +554,13 @@ class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
     kind = models.CharField(
         max_length=20,
         default="attachment",
-        choices=(("form", "填写表单"), ("attachment", "上传附件"), ("scan", "扫描件")),
+        choices=(("form", "填写表单"), ("attachment", "上传附件"), ("scan", "扫描件"),
+                 ("billing", "结算费用明细")),
     )
     form_data = models.JSONField(default=dict, blank=True)
+    billing_data = models.JSONField(
+        default=dict, blank=True, editable=False, verbose_name="计费明细"
+    )
     source_document = models.ForeignKey(
         "self", on_delete=models.PROTECT, null=True, blank=True, related_name="derived_documents"
     )
@@ -598,9 +602,11 @@ class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
     def short_name(self):
         if self.kind == "form":
             return self.original_name
+        if self.kind == "billing":
+            return f"结算费用明细_{self.item_number:02d}"
         from pathlib import Path
 
-        label = dict(MATERIALS)[self.material]
+        label = dict(DOCUMENT_MATERIALS)[self.material]
         state = (
             "扫描件" if self.is_direct_scan else
             "用印后" if self.is_sealed else "审批件" if self.kind == "scan" else "附件"
@@ -618,7 +624,11 @@ class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=("order", "material", "version"), name="oa_document_version"
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("order",), condition=models.Q(kind="billing", removed_at__isnull=True),
+                name="oa_one_current_billing_per_order",
+            ),
         ]
 
 

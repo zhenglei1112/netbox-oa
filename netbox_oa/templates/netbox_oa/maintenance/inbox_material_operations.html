@@ -1,31 +1,34 @@
-{% if detail.order.status == 'draft' and material.key == 'order' %}
+{% with review_key=material.review_key|default:material.key %}
+{% if material.key == 'settlement' %}<a class="btn btn-ghost-primary" title="计费明细" aria-label="计费明细" href="{% url 'plugins:netbox_oa:settlement_billing_list' pk=detail.order.pk %}"><i class="mdi mdi-calculator" aria-hidden="true"></i></a>{% endif %}
+{% if detail.order.status == 'draft' and material.key == 'order' and material.requires_filling %}
   {% if detail.can_change %}
-    <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}{% if workbench_v2 %}?ui=v2{% endif %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+    <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}?return_query={{ return_query|urlencode }}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
   {% endif %}
 {% elif not material.requires_filling %}
   {% if material.required_now and detail.can_act and material.can_upload_now and perms.netbox_oa.add_maintenancedocument %}
     {% include 'netbox_oa/maintenance/upload_button.html' with order_id=detail.order.pk material_key=material.key %}
   {% endif %}
-  <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ material.key }}" href="{{ detail_url }}&amp;panel=review-{{ material.key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
+  <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
 {% elif material.required_now %}
   {% if material.requires_filling and detail.can_act and material.can_fill %}
     {% if material.key == 'order' and detail.order_correction %}
-      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}{% if workbench_v2 %}?ui=v2{% endif %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}?return_query={{ return_query|urlencode }}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
     {% else %}
-      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenance_company_form' pk=detail.order.pk material=material.key %}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
+      <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenance_company_form' pk=detail.order.pk material=material.key %}?return_query={{ return_query|urlencode }}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>
     {% endif %}
   {% endif %}
   {% if detail.current.kind == 'approval' or detail.current.kind == 'countersign' %}
-    <a class="btn btn-ghost-primary" title="审阅" aria-label="审阅" data-oa-open="review-{{ material.key }}" href="{{ detail_url }}&amp;panel=review-{{ material.key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
+    <a class="btn btn-ghost-primary" title="审阅" aria-label="审阅" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
   {% elif material.requires_filling and material.form_document and not material.can_seal_scans %}
     <a class="btn btn-ghost-primary" title="打印" aria-label="打印" href="{% url 'plugins:netbox_oa:maintenance_print' pk=material.form_document.pk %}" target="_blank" rel="noopener"><i class="mdi mdi-printer" aria-hidden="true"></i></a>
   {% endif %}
   {% if detail.can_act and material.can_upload_now and perms.netbox_oa.add_maintenancedocument %}
     {% include 'netbox_oa/maintenance/upload_button.html' with order_id=detail.order.pk material_key=material.key %}
     {% if detail.current.kind != 'approval' and detail.current.kind != 'countersign' %}
-      <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ material.key }}" href="{{ detail_url }}&amp;panel=review-{{ material.key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
+      <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
     {% endif %}
   {% endif %}
 {% else %}
-  <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ material.key }}" href="{{ detail_url }}&amp;panel=review-{{ material.key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
+  <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
 {% endif %}
+{% endwith %}

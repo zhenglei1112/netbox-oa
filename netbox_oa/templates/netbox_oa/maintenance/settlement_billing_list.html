@@ -1,0 +1,23 @@
+{% extends 'generic/_base.html' %}
+{% block title %}结算费用明细{% endblock %}
+{% block subtitle %}<p class="text-muted">{{ order.number }} · {{ order.contract_number }}</p>{% endblock %}
+{% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}
+{% include 'netbox_oa/maintenance/billing_modal_assets.html' %}
+<div data-billing-overview>
+<div class="mb-3"><a class="btn btn-outline-secondary" href="{{ return_url }}">{{ return_label }}</a></div>
+{% if can_add_billing and not documents %}<a class="btn btn-primary mb-3" data-oa-billing href="{% url 'plugins:netbox_oa:settlement_billing_create' pk=order.pk %}{{ billing_return_query }}">维护计费明细</a>{% endif %}
+{% for document in documents %}
+<div class="card mb-3">
+  <div class="card-header"><h2 class="card-title">费用明细</h2>
+    {% if document.can_edit_billing %}<a class="btn btn-primary ms-auto" data-oa-billing href="{% url 'plugins:netbox_oa:settlement_billing_edit' pk=document.pk %}{{ billing_return_query }}">维护计费明细</a>{% endif %}
+  </div>
+  <div class="card-body">
+    {% if document.billing_data %}{% include 'netbox_oa/maintenance/settlement_billing_table.html' with billing=document.billing_data %}
+    {% else %}<p class="text-warning">尚未维护计费明细。</p>{% endif %}
+  </div>
+</div>
+{% empty %}<p class="alert alert-info">暂无费用明细，可在验收申请环节直接维护，无需先上传服务结算单。</p>{% endfor %}
+<p class="fw-bold">当前有效费用明细合计：{{ total }} 元</p>
+</div>
+{% endblock %}

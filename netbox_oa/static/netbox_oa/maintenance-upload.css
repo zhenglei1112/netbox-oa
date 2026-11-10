@@ -9,4 +9,8 @@
 .oa-upload-drop:focus-within, .oa-upload-drop.dragging { outline: 2px solid var(--tblr-link-color,var(--bs-link-color)); outline-offset: 2px; }
 .oa-upload-selected { padding-left: 20px; margin: 20px 0; overflow-wrap: anywhere; }
 .oa-upload-selected:empty { display: none; }
+.oa-upload-loading { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; background-color: rgba(244, 246, 250, .6); backdrop-filter: blur(3px); }
+.oa-upload-loading[hidden] { display: none; }
+.oa-upload-loading > i { font-size: 3.5rem; display: inline-block; }
+[data-bs-theme="dark"] .oa-upload-loading { background-color: rgba(21, 25, 34, .6); }
 @media(max-width: 650px) { .oa-upload-page { margin: 12px auto; padding: 18px; } }

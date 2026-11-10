@@ -1,6 +1,7 @@
 {% extends 'base/layout.html' %}{% load static %}
 {% block title %}手机手写签名{% endblock %}
 {% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}
 <h1>手机手写签名</h1>
 <p>工单编号：{{ signature.document.order.number }} · {% if signature.task %}{{ signature.task.name }}{% else %}申请人签名{% endif %}</p>
 <p>使用手机扫描二维码，书写完整名字后提交。手机仅采集签名，审核仍需在电脑端确认。</p>

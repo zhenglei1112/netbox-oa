@@ -1,0 +1,6 @@
+{% load static %}
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>计费明细已保存</title></head>
+<body><p role="status" data-billing-saved data-total="{{ total }}">计费明细已保存。</p>
+{{ summary_html|json_script:'oa-billing-summary-result' }}
+<script src="{% static 'netbox_oa/maintenance-billing-embed.js' %}?v=20261106-2" defer></script>
+</body></html>

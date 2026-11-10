@@ -71,6 +71,7 @@
     if (!['oa-upload-cancel', 'oa-upload-complete'].includes(event.data?.type)) return;
     dialog.close();
     if (event.data.type === 'oa-upload-complete') {
+      window.oaNotify?.('材料上传成功。', 'success');
       if (document.querySelector('.oa-inbox')) {
         document.dispatchEvent(new CustomEvent('oa-upload-complete'));
       } else {

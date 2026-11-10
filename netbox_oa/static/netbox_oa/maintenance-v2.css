@@ -1,6 +1,6 @@
 /* The v2 layout shares native controls and dialogs with the original workbench. */
 .oa-inbox.oa-industrial.oa-v2 > .oa-columns {
-  grid-template-columns: minmax(250px, 290px) minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) 300px;
   gap: 16px;
 }
 .oa-v2 .oa-heading { align-items: center; }
@@ -66,7 +66,7 @@
 }
 @container oa-workbench (max-width: 1239px) {
   .oa-inbox.oa-industrial.oa-v2 > .oa-columns {
-    grid-template-columns: minmax(250px, 290px) minmax(0, 1fr) 72px;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) 72px;
   }
 }
 @container oa-workbench (max-width: 760px) {
@@ -83,3 +83,12 @@
   .oa-v2-guide-heading, .oa-v2-guide-body, .oa-v2-assignee { padding-inline: 14px; }
   .oa-v2-handle { padding: 14px; }
 }
+
+.oa-v2 .oa-tabs a { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.oa-v2 .oa-tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.6em; height: 1.6em; padding-inline: .3em; border-radius: 50%;
+  background: var(--oa-border); color: inherit; font-size: .8em;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.oa-v2 .oa-tabs .active .oa-tab-count { background: var(--oa-accent); color: #fff; }

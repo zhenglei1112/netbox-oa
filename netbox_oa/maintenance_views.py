@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import F, OuterRef, Q, Subquery
 from django.http import FileResponse, Http404, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -19,7 +19,15 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from . import maintenance_services as services
 from .maintenance_contracts import order_object_links
 from .maintenance_diagram import build_diagram
-from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES, STAGES, build_steps, scan_fill_key
+from .maintenance_flow import (
+    FLOW_NAME,
+    MATERIALS,
+    RETIRED_MATERIALS,
+    ROLES,
+    STAGES,
+    build_steps,
+    scan_fill_key,
+)
 from .maintenance_forms import (
     MaintenanceActionForm,
     MaintenanceCompanyForm,
@@ -32,9 +40,12 @@ from .maintenance_forms import (
     MaintenanceScanUploadForm,
 )
 from .maintenance_materials import (
+    ACCEPTANCE_SIGNING_NODES,
     COMPANY_FORMS,
     PRINTABLE_FORMS,
+    SERVICE_EFFECTS,
     SERVICE_ITEMS,
+    TASK_SIGNING_NODES,
     company_form_initial,
 )
 from .maintenance_payments import payment_context
@@ -58,7 +69,30 @@ def actionable_tasks(user):
             Q(assigned_user=user)
             | Q(assigned_user__isnull=True, assigned_group__in=user.groups.all())
         )
-    return tasks.filter(order__in=MaintenanceOrder.objects.restrict(user, "view"))
+    return tasks.filter(order__in=MaintenanceOrder.objects.restrict(user, "view")).exclude(
+        kind__in=["approval", "countersign"], order__requester=user,
+    )
+
+
+def personal_todo_tasks(user, tasks=None):
+    """Include requester seal reminders without granting task handling permission."""
+    tasks = actionable_tasks(user) if tasks is None else tasks
+    personal = tasks.filter(
+        Q(assigned_user=user)
+        | Q(assigned_user__isnull=True, assigned_group__in=user.groups.all())
+    )
+    reminders = MaintenanceTask.objects.restrict(user, "view").filter(
+        status="pending", kind="action", order__status="active", order__requester=user,
+        order__in=MaintenanceOrder.objects.restrict(user, "view"),
+        position=F("order__current_position"),
+    )
+    reminder_ids = [
+        pk for pk, position, steps in reminders.values_list(
+            "pk", "position", "order__steps_snapshot"
+        )
+        if position < len(steps) and steps[position].get("key") in {"order_seal", "acceptance_seal"}
+    ]
+    return personal | reminders.filter(pk__in=reminder_ids)
 
 
 def presentation(
@@ -81,12 +115,15 @@ def presentation(
         return summary
     materials = []
     scan_materials = {
-        node["scan_material"] for node in order.steps_snapshot if node.get("scan_material")
+        material for node in order.steps_snapshot
+        for material in ([node["scan_material"]] if node.get("scan_material") else [])
+        + node.get("scan_materials", [])
     }
     node = order.steps_snapshot[order.current_position] if order.steps_snapshot else {}
     required_states = dict(node.get("required", []))
     documents = list(
         order.documents.restrict(user, "view").filter(removed_at__isnull=True)
+        .exclude(kind="billing")
         .select_related("source_document", "replaces_document", "order")
         .order_by("material", "-version")
     )
@@ -94,7 +131,11 @@ def presentation(
     replaced_ids = set(order.documents.exclude(replaces_document_id=None).values_list(
         "replaces_document_id", flat=True
     ))
-    for key, name in MATERIALS:
+    historical_materials = tuple(
+        (key, name) for key, name in RETIRED_MATERIALS
+        if any(doc.material == key for doc in documents)
+    )
+    for key, name in MATERIALS + historical_materials:
         versions = [doc for doc in documents if doc.material == key]
         source = next((doc for doc in versions
                        if doc.kind != "scan" and doc.pk not in replaced_ids), None)
@@ -144,6 +185,7 @@ def presentation(
             )
             or required_states.get(key) in {"scan", "sealed"}
         )
+        can_upload_now = can_upload_now and key in dict(MATERIALS)
         current = summary["current"]
         stage_upload_required = bool(
             current and key in summary["required_materials"] and can_upload_now
@@ -243,6 +285,51 @@ def presentation(
         )
     if materials_only:
         return {**summary, "materials": materials}
+    document_groups = [
+        {"key": "electronic", "name": "电子版", "materials": []},
+        {"key": "sealed", "name": "用印后", "materials": []},
+        {"key": "scan", "name": "扫描件", "materials": []},
+    ]
+    for material in materials:
+        key = material["key"]
+        categories = document_groups[:2] if key in COMPANY_FORMS else document_groups[2:]
+        for group in categories:
+            category = group["key"]
+            electronic = category == "electronic"
+            sealed = category == "sealed"
+            required = material["required_now"] and (
+                not (electronic or sealed)
+                or (required_states.get(key) == "sealed") == sealed
+            )
+            current_file = material["current_file"]
+            if electronic:
+                current_file = material["form_document"]
+            elif sealed:
+                current_file = next((
+                    doc for doc in material["scans"]
+                    if doc.is_sealed and material["form_document"]
+                    and doc.source_document_id == material["form_document"].pk
+                ), None)
+            group["materials"].append({
+                **material,
+                "category": category,
+                "category_label": group["name"],
+                "review_key": f"{key}-sealed" if sealed else key,
+                "required_now": required,
+                "requires_filling": electronic,
+                "can_fill": electronic and material["can_fill"],
+                "can_upload_now": not electronic and material["can_upload_now"],
+                "stage_upload_required": required and material["stage_upload_required"],
+                "current_file": current_file,
+                "file_count": len(material["scan_sources"]) if material["scanned_material"]
+                else len(material["attachments"]),
+            })
+    document_cards = [item for group in document_groups for item in group["materials"]]
+    current_document_groups = [
+        {**group, "materials": [item for item in group["materials"] if item["required_now"]]}
+        for group in document_groups
+    ]
+    current_document_groups = [group for group in current_document_groups if group["materials"]]
     links = []
     for link in order.links.restrict(user, "view").select_related("object_type"):
         model = link.object_type.model_class()
@@ -261,16 +348,14 @@ def presentation(
         "has_stage_operations": bool(
             payment_contract_stage
             or node.get("kind") == "external"
-            or node.get("key")
-            in {"order_correction", "order_review", "order_final", "payment_plan"}
+            or node.get("key") in TASK_SIGNING_NODES
         ),
-        "settlement_filling": bool(node.get("key") == "settlement_fill"),
         "payment_contract_stage": payment_contract_stage,
+        "payment_application": node.get("key") == "payment_eip",
         "can_mobile_sign": bool(
             summary["can_act"]
             and summary["current"]
-            and order.steps_snapshot[summary["current"].position]["key"]
-            in {"order_correction", "order_review", "order_final"}
+            and order.steps_snapshot[summary["current"].position]["key"] in TASK_SIGNING_NODES
             and (node.get("key") not in {"order_correction"} or user.pk == order.requester_id)
         ),
         "applicant_signature_required": node.get("key") in {"order_correction"},
@@ -284,6 +369,9 @@ def presentation(
         **inbox.history(order, history_limit),
         "approval_diagram": inbox.approval_diagram(order),
         "materials": materials,
+        "document_groups": document_groups,
+        "current_document_groups": current_document_groups,
+        "document_cards": document_cards,
         "required_company_forms": [
             item for item in materials if item["key"] in COMPANY_FORMS and item["required_now"]
         ],
@@ -338,59 +426,67 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
         roles = dict(ROLES) | {"owner": "线路主管（工单负责人）", "requester": "发起人"}
         payments = dict(MaintenanceOrder._meta.get_field("payment_status").choices)
         stages = []
+        normal_position = 0
         for key, name in STAGES:
             nodes = []
-            for position, step in enumerate(steps, 1):
+            for step in steps:
                 if step["stage"] != key:
                     continue
+                if not step.get("return_only"):
+                    normal_position += 1
                 rules = []
                 step_key = step["key"]
                 if step_key in {"order_correction"}:
                     rules.append("填写并保存维护服务工单，核对外购合同、服务单位及服务省市")
                     rules.append("必须由申请人本人完成手写签名后提交；表单修订后须重新签名")
+                elif step_key == "acceptance_apply":
+                    rules.append("填写工单验收单，基本信息自动带入且只读，选择服务效果并填写结算金额")
+                    rules.append(
+                        "至少上传一份服务报告和一份服务结算单扫描件，两类附件均无需用印；"
+                        "支持多选或拖入 PDF、PNG、JPEG 文件，每份不超过 20 MB"
+                    )
+                    rules.append("退回后修订验收单并更新两类附件，再重新提交复核")
+                    rules.append("完成本环节手写签名后才能提交，签名绑定当前验收单版本")
+                elif step_key in ACCEPTANCE_SIGNING_NODES:
+                    rules.append("核对验收单及全部扫描附件，完成本环节手写签名（自动记录日期）")
+                    rules.append("签名绑定本次验收单版本；修订后须重新签名，审批期间不能修改材料")
                 elif step_key in {"order_review", "order_final"}:
-                    rules.append("核对工单内容并签字确认")
+                    rules.append("核对工单内容，完成本人手写签名后同意批转；签名绑定当前工单版本")
                 elif step_key in {"payment_plan", "payment_review"}:
                     rules.append(
                         "点击付款信息进入外购合同详情页，由工单发起人维护付款信息后提交"
                         if step_key == "payment_plan"
                         else "点击付款信息进入外购合同详情页，核对付款信息后审核"
                     )
-                    rules.append("OA 不要求选择付款记录或填写付款周期、金额")
                 elif step.get("scan_material"):
                     material_key = step["scan_material"]
                     material_name = dict(MATERIALS)[material_key]
-                    if step_key == scan_fill_key(material_key):
-                        rules.append(
-                            f"至少上传一份扫描版{material_name}，"
-                            "可一次上传多个 PDF、PNG 或 JPEG 文件，每份不超过 20 MB"
-                        )
-                        if material_key == "order":
-                            rules.append("打印服务工单，签字后上传用印前扫描件")
-                        if material_key == "settlement":
-                            rules.append("本环节不填写结算期")
-                    elif step_key == f"{material_key}_sealed_upload":
+                    if step_key == f"{material_key}_sealed_upload":
                         rules.append("逐份上传对应本次审批原件的用印后扫描件，全部齐备后方可提交")
+                        rules.append("本环节只能维护用印件，审批原件及历史版本保留查阅")
                     elif step_key == f"{material_key}_seal":
                         rules.append("按本次审批通过的材料办理用印，完成后交由发起人上传用印后材料")
                     else:
-                        rules.append(f"审核本次提交的全部{material_name}；修改材料须先退回补正")
+                        rules.append(
+                            f"审核已签字的系统{material_name}表单，无需上传用印前扫描件；"
+                            "修改材料须先退回工单修正"
+                        )
                 if step["kind"] == "external":
                     rules.append("必填外部付款申请单号，由经办人登记申请结果")
-                if step["key"] == "payment_eip":
-                    rules.append("提交后完成 OA 工单，不代表已付款或已收款")
                 nodes.append(
                     {
                         **step,
-                        "position": "修正" if step.get("return_only") else position - 1,
+                        "position": "修正" if step.get("return_only") else normal_position,
                         "kind_label": kinds[step["kind"]],
-                        "role_label": roles[step["role"]],
+                        "role_label": (
+                            "复核人" if step_key == "acceptance_review" else roles[step["role"]]
+                        ),
                         "group": groups.get(step["role"]),
                         "materials": [
                             f"{dict(MATERIALS)[material]} · "
                             + (
                                 "扫描版（可多份）"
-                                if (step.get("scan_material")) and state == "scan"
+                                if material in {"report", "settlement"} and state == "scan"
                                 else "扫描版（用印后）"
                                 if state == "sealed"
                                 else states[state]
@@ -404,6 +500,8 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                         "completion_label": (
                             "工单完成；付款申请已提交"
                             if step["key"] == "payment_eip"
+                            else "重新进入工单复核"
+                            if step.get("return_only")
                             else "进入下一环节"
                         ),
                         "rules": rules,
@@ -411,11 +509,13 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                 )
             stage_summary = {
                 "ordering": (
-                    "申请人填写工单并签名，经初审、部门审核及服务工单"
-                    "两级用印审批和用印后进入服务报告。"
+                    "申请人填写工单并签名，经复核、部门审核后直接进行工单公司审批，"
+                    "按审核通过的工单表单用印，上传用印后服务工单再进入工单验收。"
                 ),
-                "report": "上传扫描版服务报告，经两级用印审批后逐份上传用印结果。",
-                "settlement": "上传扫描版服务结算单，经两级用印审批后逐份上传用印结果。",
+                "acceptance": (
+                    "填写验收单并上传服务报告、服务结算单，申请人、复核人和部门审核人签名后，"
+                    "经公司审批，办理验收单用印并上传用印件。"
+                ),
                 "payment": "在合同中维护付款信息，经部门审核后登记外部付款申请。",
             }
             nodes.sort(key=lambda node: bool(node.get("return_only")))
@@ -452,40 +552,52 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
 
 
 class MaintenanceWorkbenchView(LoginRequiredMixin, View):
-    version_two = False
-
     def get(self, request, pk=None, action_form=None, action_error="", status=200):
-        version_two = self.version_two or request.GET.get("ui") == "v2"
         orders = MaintenanceOrder.objects.restrict(request.user, "view").select_related(
             "owner", "requester", "policy"
         )
         tasks = actionable_tasks(request.user)
+        assigned = Q(assigned_user=request.user) | Q(
+            assigned_user__isnull=True, assigned_group__in=request.user.groups.all()
+        )
+        personal_tasks = personal_todo_tasks(request.user, tasks)
+        # Read the frozen workflow key rather than relying on editable task names.
+        pending_payment_ids = [
+            order_id for order_id, position, steps in orders.filter(
+                status="active", stage="payment"
+            ).values_list("pk", "current_position", "steps_snapshot")
+            if 0 <= position < len(steps) and steps[position].get("key") == "payment_eip"
+        ]
         tab = request.GET.get("tab", "todo")
-        if tab not in {"todo", "done", "mine", "following", "all"}:
+        if tab == "mine":
+            tab = "done"
+        if tab not in {"todo", "pending_payment", "delegate", "done", "following", "all"}:
             tab = "todo"
-        filtered = orders
+        drafts = MaintenanceOrder.objects.restrict(request.user, "change").filter(
+            status="draft", requester=request.user
+        )
+        completed = MaintenanceTask.objects.restrict(request.user, "view").filter(
+            status="completed", decided_by=request.user
+        )
+        groups = {
+            "todo": orders.filter(
+                Q(pk__in=personal_tasks.values("order_id")) | Q(pk__in=drafts.values("pk"))
+            ).exclude(pk__in=pending_payment_ids),
+            "pending_payment": orders.filter(pk__in=pending_payment_ids, requester=request.user),
+            "delegate": orders.filter(
+                pk__in=tasks.exclude(assigned).values("order_id")
+            ).exclude(pk__in=personal_tasks.values("order_id")),
+            "done": orders.filter(
+                Q(requester=request.user) | Q(pk__in=completed.values("order_id"))
+            ).exclude(status="draft").exclude(pk__in=personal_tasks.values("order_id")),
+            "following": orders.filter(followers=request.user),
+            "all": orders,
+        }
+        filtered = groups[tab]
         if pk:
             selected = get_object_or_404(orders, pk=pk)
         else:
             selected = None
-        if tab == "todo":
-            drafts = MaintenanceOrder.objects.restrict(request.user, "change").filter(
-                status="draft"
-            )
-            if not request.user.is_superuser:
-                drafts = drafts.filter(Q(requester=request.user) | Q(owner=request.user))
-            filtered = filtered.filter(
-                Q(pk__in=tasks.values("order_id")) | Q(pk__in=drafts.values("pk"))
-            )
-        elif tab == "done":
-            completed = MaintenanceTask.objects.restrict(request.user, "view").filter(
-                status="completed", decided_by=request.user
-            )
-            filtered = filtered.filter(pk__in=completed.values("order_id"))
-        elif tab == "mine":
-            filtered = filtered.filter(requester=request.user)
-        elif tab == "following":
-            filtered = filtered.filter(followers=request.user)
         stage = request.GET.get("stage", "")
         if stage in dict(STAGES):
             filtered = filtered.filter(stage=stage)
@@ -513,7 +625,12 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
         if not selected:
             selected_id = request.GET.get("selected", "")
             if selected_id.isdecimal():
-                selected = get_object_or_404(orders, pk=selected_id)
+                if request.GET.get("restore") == "1":
+                    selected = filtered.filter(pk=selected_id).first()
+                    if selected is None:
+                        selected = rows[0] if rows else None
+                else:
+                    selected = get_object_or_404(orders, pk=selected_id)
             else:
                 selected = rows[0] if rows else None
         display_orders = {order.pk: order for order in rows}
@@ -529,14 +646,10 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             history_limit = min(history_limit, inbox.events.filter(order=selected).count() + 50)
         query_params = request.GET.copy()
         query_params["tab"] = tab
-        for key in ("selected", "history", "panel", "pane"):
+        for key in ("selected", "history", "panel", "pane", "restore"):
             query_params.pop(key, None)
-        if version_two:
-            query_params["ui"] = "v2"
-        base_url = reverse(
-            "plugins:netbox_oa:maintenance_workbench_v2" if version_two
-            else "plugins:netbox_oa:maintenance_workbench"
-        )
+        query_params.pop("ui", None)
+        base_url = reverse("plugins:netbox_oa:maintenance_workbench_v2")
         list_url = f"{base_url}?{query_params.urlencode()}"
         detail_params = query_params.copy()
         if selected:
@@ -552,19 +665,23 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             row["url"] = f"{base_url}?{params.urlencode()}"
         tabs = []
         for key, label in (
-            ("todo", "待办工单"),
-            ("done", "已办工单"),
-            ("mine", "发起工单"),
-            ("following", "关注工单"),
-            ("all", "全部工单"),
+            ("todo", "待办"),
+            ("pending_payment", "待付款"),
+            ("delegate", "代办"),
+            ("done", "已办"),
+            ("following", "关注"),
+            ("all", "全部"),
         ):
             params = query_params.copy()
             params["tab"] = key
-            tabs.append({"key": key, "label": label, "url": f"{base_url}?{params.urlencode()}"})
+            tabs.append({
+                "key": key, "label": label, "count": groups[key].count(),
+                "url": f"{base_url}?{params.urlencode()}",
+            })
         now = timezone.now()
         warning = sum(
             now < deadline <= now + timedelta(hours=hours)
-            for deadline, hours in tasks.values_list("deadline", "order__warning_hours")
+            for deadline, hours in personal_tasks.values_list("deadline", "order__warning_hours")
         )
         month_start = timezone.localtime(now).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
@@ -591,9 +708,9 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             "q": query,
             "node_filter": node,
             "stats": {
-                "todo": tasks.count(),
+                "todo": personal_tasks.count(),
                 "warning": warning,
-                "overdue": tasks.filter(deadline__lte=now).count(),
+                "overdue": personal_tasks.filter(deadline__lte=now).count(),
                 "active": orders.filter(status="active").count(),
                 "completed": orders.filter(
                     status="completed", completed_at__gte=month_start
@@ -612,21 +729,11 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             else MaintenanceActionForm(order=selected, actor=request.user),
             "total": filtered.count(),
         }
-        switch_params = query_params.copy()
-        switch_params.pop("ui", None)
-        if selected:
-            switch_params["selected"] = selected.pk
-        switch_route = (
-            "plugins:netbox_oa:maintenance_workbench" if version_two
-            else "plugins:netbox_oa:maintenance_workbench_v2"
-        )
-        context["version_switch_url"] = f"{reverse(switch_route)}?{switch_params.urlencode()}"
         context["workbench_url"] = base_url
-        context["workbench_v2"] = version_two
-        if version_two:
-            context["guide"] = handling_guide(context["detail"])
-        template = "workbench_v2.html" if version_two else "workbench.html"
-        response = render(request, f"netbox_oa/maintenance/{template}", context, status=status)
+        context["guide"] = handling_guide(context["detail"])
+        response = render(
+            request, "netbox_oa/maintenance/workbench_v2.html", context, status=status
+        )
         explicit_open = bool(pk or request.GET.get("selected", "").isdecimal())
         ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         navigation = request.headers.get("X-OA-Navigation")
@@ -635,10 +742,6 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
                 and (not ajax or navigation == "detail")):
             services.record_order_view(pk=selected.pk, actor=request.user)
         return response
-
-
-class MaintenanceWorkbenchV2View(MaintenanceWorkbenchView):
-    version_two = True
 
 
 def order_form_response(request, form, order=None):
@@ -678,11 +781,10 @@ def order_form_response(request, form, order=None):
             "object": order or form.instance,
             "form": form,
             "return_url": (
-                reverse("plugins:netbox_oa:maintenance_workbench_v2")
-                + (f"?selected={order.pk}" if order else "")
-                if request.GET.get("ui") == "v2"
-                else reverse("plugins:netbox_oa:maintenance_workbench")
+                workbench_return_url(request, order.pk) if order
+                else reverse("plugins:netbox_oa:maintenance_workbench_v2")
             ),
+            "return_query": workbench_params(request).urlencode(),
             "signing_form": signing_form,
             "signature_save_url": request.get_full_path(),
             "expected_document_id": request.POST.get(
@@ -702,11 +804,7 @@ def order_form_result(request, order):
     from . import maintenance_signatures as signing
     from .maintenance_signature_views import signature_payload
 
-    suffix = "?ui=v2" if request.GET.get("ui") == "v2" else ""
-    detail_url = (
-        f"{reverse('plugins:netbox_oa:maintenance_workbench_v2')}?selected={order.pk}"
-        if suffix else order.get_absolute_url()
-    )
+    detail_url = workbench_return_url(request, order.pk)
     if "_signature" in request.POST:
         if order.status == "draft":
             signature = signing.create_draft_session(pk=order.pk, actor=request.user)
@@ -717,7 +815,7 @@ def order_form_result(request, order):
         result = signature_payload(signature, request)
         result.update(
             form_action=(
-                reverse("plugins:netbox_oa:maintenanceorder_edit", args=[order.pk]) + suffix
+                reverse("plugins:netbox_oa:maintenanceorder_edit", args=[order.pk])
             ),
             document_id=signature.document_id,
         )
@@ -731,11 +829,14 @@ def order_form_result(request, order):
         return redirect(detail_url)
     if "_addanother" in request.POST:
         messages.success(request, f"已保存草稿 {order.number}。")
-        return redirect(reverse("plugins:netbox_oa:maintenanceorder_add") + suffix)
+        return redirect(reverse("plugins:netbox_oa:maintenanceorder_add"))
     if order.status == "draft":
         messages.success(request, "草稿已保存，可继续签名并提交审批。")
+        params = QueryDict(mutable=True)
+        params["return_query"] = workbench_params(request).urlencode()
         return redirect(
-            reverse("plugins:netbox_oa:maintenanceorder_edit", args=[order.pk]) + suffix
+            reverse("plugins:netbox_oa:maintenanceorder_edit", args=[order.pk])
+            + (f"?{params.urlencode()}" if params["return_query"] else "")
         )
     return redirect(detail_url)
 
@@ -833,39 +934,42 @@ class MaintenanceOrderEditView(LoginRequiredMixin, View):
 
 
 def workbench_params(request):
-    source = QueryDict(request.POST.get("return_query", ""))
+    source = QueryDict(request.POST.get("return_query", request.GET.get("return_query", "")))
     params = QueryDict(mutable=True)
     for key in (
-        "tab", "q", "stage", "node", "sort", "ui", "scope", "status", "page", "per_page",
-        "tableconfig_id", "section", "history",
+        "tab", "q", "stage", "node", "sort", "history",
     ):
         if key in source:
             params[key] = source[key]
     return params
 
 
+def workbench_return_url(request, order_id):
+    params = workbench_params(request)
+    params["selected"] = order_id
+    params["restore"] = "1"
+    return f"{reverse('plugins:netbox_oa:maintenance_workbench_v2')}?{params.urlencode()}"
+
+
 def workbench_redirect(request, order_id):
     params = workbench_params(request)
-    if params.get("ui") == "v3":
-        from .maintenance_v3 import detail_url
-
-        return redirect(detail_url(request, order_id))
     params["selected"] = order_id
+    params["restore"] = "1"
     panel = request.POST.get("return_panel", "")
     if panel in {f"material-{key}" for key, _ in MATERIALS}:
         params["panel"] = panel
-    route = (
-        "plugins:netbox_oa:maintenance_workbench_v2" if params.get("ui") == "v2"
-        else "plugins:netbox_oa:maintenance_workbench"
+    params.pop("ui", None)
+    return redirect(
+        f"{reverse('plugins:netbox_oa:maintenance_workbench_v2')}?{params.urlencode()}"
     )
-    return redirect(f"{reverse(route)}?{params.urlencode()}")
+
+
+def task_success_redirect(request, order_id):
+    """Retain the current category and select the first remaining order if needed."""
+    return redirect(workbench_return_url(request, order_id))
 
 
 def workbench_error(request, order_id, error, form=None, status=400):
-    if workbench_params(request).get("ui") == "v3":
-        from .maintenance_v3 import error_response
-
-        return error_response(request, order_id, error, form, status)
     request.GET = workbench_params(request)
     if request.POST.get("return_panel") == "routing":
         request.GET["panel"] = "routing"
@@ -893,12 +997,6 @@ class MaintenanceOrderActionView(LoginRequiredMixin, View):
             handlers[operation](pk=pk, actor=request.user, **kwargs)
         except ValidationError as exc:
             return workbench_error(request, pk, "; ".join(exc.messages))
-        except PermissionDenied:
-            if workbench_params(request).get("ui") != "v3":
-                raise
-            return workbench_error(
-                request, pk, "当前工单的办理权限已变化，请查看最新状态。", status=403,
-            )
         return workbench_redirect(request, pk)
 
 
@@ -907,9 +1005,10 @@ class MaintenanceTaskQuickCompleteView(LoginRequiredMixin, View):
         get_object_or_404(MaintenanceTask, pk=pk)
         try:
             services.quick_complete_task(pk=pk, actor=request.user)
-        except PermissionDenied:
+        except PermissionDenied as exc:
             return JsonResponse(
-                {"error": "当前任务的办理权限或分配已变化，请刷新页面。"}, status=403,
+                {"error": str(exc) if isinstance(exc, services.SelfApprovalDenied)
+                 else "当前任务的办理权限或分配已变化，请刷新页面。"}, status=403,
             )
         except ValidationError as exc:
             return JsonResponse({"error": "; ".join(exc.messages)}, status=400)
@@ -920,15 +1019,7 @@ class MaintenanceTaskActionView(LoginRequiredMixin, View):
     def post(self, request, pk, operation):
         task = get_object_or_404(MaintenanceTask, pk=pk)
         form = MaintenanceActionForm(request.POST, order=task.order, actor=request.user)
-        try:
-            _allowed(MaintenanceTask, request.user, "change", pk)
-        except PermissionDenied:
-            if workbench_params(request).get("ui") != "v3":
-                raise
-            return workbench_error(
-                request, task.order_id, "当前任务的办理权限已变化，请查看最新状态。",
-                form, status=403,
-            )
+        _allowed(MaintenanceTask, request.user, "change", pk)
         if form.is_valid():
             data = form.cleaned_data
             handlers = {
@@ -955,19 +1046,30 @@ class MaintenanceTaskActionView(LoginRequiredMixin, View):
                     handlers[operation](pk=pk, actor=request.user, **kwargs)
                 except ValidationError as exc:
                     return workbench_error(request, task.order_id, "; ".join(exc.messages), form)
-                except PermissionDenied:
+                except PermissionDenied as exc:
                     return workbench_error(
                         request,
                         task.order_id,
-                        "当前任务的办理权限或分配已变化，请查看最新状态。",
+                        str(exc) if isinstance(exc, services.SelfApprovalDenied)
+                        else "当前任务的办理权限或分配已变化，请查看最新状态。",
                         form,
                         status=403,
                     )
                 else:
-                    messages.success(request, "操作完成。")
+                    result = {
+                        "complete": "已同意。" if task.kind in {"approval", "countersign"}
+                        else "本阶段办理完成。",
+                        "return": "已退回补正。",
+                        "transfer": "已转办。",
+                        "countersign": "已加签。",
+                    }[operation]
+                    messages.success(
+                        request, result,
+                        extra_tags="oa-task-completed",
+                    )
         else:
             return workbench_error(request, task.order_id, "请检查办理信息。", form)
-        return workbench_redirect(request, task.order_id)
+        return task_success_redirect(request, task.order_id)
 
 
 @method_decorator(xframe_options_sameorigin, name="dispatch")
@@ -1042,7 +1144,7 @@ class MaintenanceMaterialUploadView(LoginRequiredMixin, View):
             data, request.FILES or None, material_name=item["name"], scan=scan,
             source_choices=choices, requires_source=requires_source,
             allow_revision=allow_revision and not replacement,
-            multiple=material != "order" and not replacement,
+            multiple=material not in COMPANY_FORMS and not replacement,
             revision_choices=[(doc.pk, doc.short_name) for doc in (
                 [replacement] if replacement else revision_sources
             )],
@@ -1090,7 +1192,7 @@ class MaintenanceMaterialUploadView(LoginRequiredMixin, View):
         return render(request, "netbox_oa/maintenance/material_upload.html", {
             "order": order, "material": item, "form": form, "batch": batch, "scan": scan,
             "allow_revision": allow_revision and not replacement,
-            "multiple": material != "order" and not replacement,
+            "multiple": material not in COMPANY_FORMS and not replacement,
             "replacement": replacement,
             "upload_base": "netbox_oa/maintenance/upload_embedded.html"
             if request.GET.get("embed") == "1" else "base/layout.html",
@@ -1175,7 +1277,7 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
                 documents.append(scan)
                 if scan.sealed_scan:
                     documents.append(scan.sealed_scan)
-            if material["form_document"]:
+            if material["form_document"] and material["form_document"] not in documents:
                 documents.append(material["form_document"])
             if not documents and material["attachments"]:
                 latest_task_id = material["attachments"][0].uploaded_task_id
@@ -1190,7 +1292,7 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
             index_rows = {}
             for document in documents:
                 if document.kind == "form":
-                    row_key = 1 if material["key"] == "order" else "form"
+                    row_key = 1 if material["key"] in COMPANY_FORMS else "form"
                 else:
                     row_key = document.item_number or document.pk
                 row = index_rows.setdefault(row_key, {
@@ -1198,10 +1300,9 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
                     "files": [],
                 })
                 label, icon = (
-                    ("扫描件", "mdi-file-image-outline") if document.is_direct_scan else
                     ("用印后", "mdi-stamper") if document.is_sealed else
-                    ("审批件", "mdi-file-check-outline") if document.kind == "scan" else
-                    ("电子版", "mdi-file-edit-outline")
+                    ("电子版", "mdi-file-edit-outline") if document.kind == "form" else
+                    ("扫描件", "mdi-file-image-outline")
                 )
                 row["files"].append({"document": document, "label": label, "icon": icon})
                 if document.pk in maintainable_ids:
@@ -1234,6 +1335,13 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
         selected = next(
             (item for item in group["documents"] if str(item.pk) == document_id), None
         ) if document_id else group["default_document"]
+        category = request.GET.get("category")
+        if not document_id and category in {"electronic", "sealed", "scan"}:
+            selected = next((doc for doc in group["documents"] if (
+                (category == "electronic" and doc.kind == "form")
+                or (category == "sealed" and doc.is_sealed)
+                or (category == "scan" and doc.kind != "form" and not doc.is_sealed)
+            )), None)
         if document_id and selected is None:
             raise Http404("材料文件不存在或无权查看。")
         review_items = []
@@ -1254,19 +1362,12 @@ class MaintenanceReviewView(LoginRequiredMixin, View):
                         ),
                     })
         review_return_url = order.get_absolute_url()
-        if request.GET.get("ui") == "v3":
-            from .maintenance_v3 import detail_url
-
-            review_return_url = detail_url(request, order.pk)
-        review_query = request.GET.copy()
-        for key in ("material", "document", "embed"):
-            review_query.pop(key, None)
         return render(request, "netbox_oa/maintenance/review.html", {
             "order": order, "groups": groups, "selected_group": group, "selected": selected,
             "review_items": review_items,
             "read_only": self.read_only,
             "review_return_url": review_return_url,
-            "review_query": review_query.urlencode() if request.GET.get("ui") == "v3" else "",
+            "review_query": "",
         })
 
 
@@ -1299,15 +1400,6 @@ class MaintenanceDownloadView(LoginRequiredMixin, View):
         )
         _allowed(MaintenanceOrder, request.user, "view", document.order_id)
         if document.kind == "form":
-            if request.GET.get("ui") == "v3":
-                from .maintenance_v3 import params
-
-                query = params(request)
-                query["ui"] = "v3"
-                return redirect(
-                    reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
-                    + f"?{query.urlencode()}"
-                )
             return redirect("plugins:netbox_oa:maintenance_print", pk=document.pk)
         if not document.file:
             raise Http404("附件文件不存在。")
@@ -1329,7 +1421,7 @@ class MaintenanceCompanyFormView(LoginRequiredMixin, View):
             services.check_company_form_access(order, request.user, material)
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages))
-            return redirect(order)
+            return redirect(workbench_return_url(request, order.pk))
         previous = (
             order.documents.restrict(request.user, "view")
             .filter(material=material, kind="form")
@@ -1337,7 +1429,9 @@ class MaintenanceCompanyFormView(LoginRequiredMixin, View):
         )
         initial = dict(previous.form_data) if previous else company_form_initial(order)
         initial["requested_at"] = parse_datetime(initial["requested_at"])
-        form = MaintenanceCompanyForm(material=material, initial=initial, actor=request.user)
+        form = MaintenanceCompanyForm(
+            material=material, initial=initial, actor=request.user, order=order
+        )
         return self.render_form(request, order, material, form)
 
     def post(self, request, pk, material):
@@ -1346,21 +1440,29 @@ class MaintenanceCompanyFormView(LoginRequiredMixin, View):
             services.check_company_form_access(order, request.user, material)
         except ValidationError as exc:
             messages.error(request, "; ".join(exc.messages))
-            return redirect(order)
-        form = MaintenanceCompanyForm(request.POST, material=material, actor=request.user)
+            return redirect(workbench_return_url(request, order.pk))
+        form = MaintenanceCompanyForm(
+            request.POST, material=material, actor=request.user, order=order
+        )
         if form.is_valid():
             try:
-                document = services.save_company_form(
+                services.save_company_form(
                     pk=pk, actor=request.user, material=material, data=request.POST
                 )
             except ValidationError as exc:
                 form.add_error(None, exc)
             else:
-                messages.success(request, "表单已保存，可打印后签字盖章并上传扫描件。")
-                return redirect("plugins:netbox_oa:maintenance_print", pk=document.pk)
+                messages.success(request, "表单已保存。")
+                return redirect(workbench_return_url(request, order.pk))
         return self.render_form(request, order, material, form)
 
     def render_form(self, request, order, material, form):
+        acceptance_billing = {}
+        if material == "acceptance":
+            from .maintenance_billing import billing_documents
+
+            document = billing_documents(order).restrict(request.user, "view").first()
+            acceptance_billing = document.billing_data if document else {}
         return render(
             request,
             "netbox_oa/maintenance/company_form.html",
@@ -1369,6 +1471,10 @@ class MaintenanceCompanyFormView(LoginRequiredMixin, View):
                 "material": material,
                 "title": COMPANY_FORMS[material],
                 "form": form,
+                "object": order,
+                "return_url": workbench_return_url(request, order.pk),
+                "return_query": workbench_params(request).urlencode(),
+                "acceptance_billing": acceptance_billing,
             },
         )
 
@@ -1385,7 +1491,7 @@ class MaintenancePrintView(LoginRequiredMixin, View):
         _allowed(MaintenanceOrder, request.user, "view", document.order_id)
         data = document.form_data
         codes = {}
-        if document.material == "order":
+        if document.material in COMPANY_FORMS:
             from .maintenance_codes import print_codes
 
             codes = print_codes(document.order.number, request.build_absolute_uri(
@@ -1430,11 +1536,15 @@ class MaintenancePrintView(LoginRequiredMixin, View):
                         signatures[
                             "applicant" if node["key"] == "order_correction" else node["key"]
                         ] = task.evidence.get("signature", {})
+        if document.material == "acceptance":
+            for task in document.order.tasks.restrict(request.user, "view").filter(
+                status="completed"
+            ).order_by("pk"):
+                if task.evidence.get("acceptance") == document.pk:
+                    key = document.order.steps_snapshot[task.position]["key"]
+                    if key in ACCEPTANCE_SIGNING_NODES:
+                        signatures[key] = task.evidence.get("signature", {})
         print_return_url = document.order.get_absolute_url()
-        if request.GET.get("ui") == "v3":
-            from .maintenance_v3 import detail_url
-
-            print_return_url = detail_url(request, document.order_id)
         response = render(
             request,
             "netbox_oa/maintenance/print.html",
@@ -1449,6 +1559,13 @@ class MaintenancePrintView(LoginRequiredMixin, View):
                     data.get("priority", document.order.priority), "—"
                 ),
                 "signatures": signatures,
+                "service_effect_label": dict(SERVICE_EFFECTS).get(data.get("service_effect"), "—"),
+                "acceptance_signatures": [
+                    {"label": label, **signatures.get(key, {})}
+                    for key, label in (("acceptance_apply", "申请人"),
+                                       ("acceptance_review", "复核人"),
+                                       ("acceptance_department", "部门审核人"))
+                ],
             },
         )
         return response
@@ -1471,7 +1588,7 @@ class MaintenanceVerificationView(LoginRequiredMixin, View):
             MaintenanceDocument.objects.restrict(request.user, "view").select_related(
                 "order", "order__requester"
             ),
-            pk=pk, material="order", kind="form",
+            pk=pk, material__in=COMPANY_FORMS, kind="form",
         )
         order = document.order
         _allowed(MaintenanceOrder, request.user, "view", order.pk)
@@ -1483,10 +1600,13 @@ class MaintenanceVerificationView(LoginRequiredMixin, View):
             and order.steps_snapshot[task.position]["key"] == "payment_eip"
         ), None)
         latest = order.documents.restrict(request.user, "view").filter(
-            material="order", kind="form"
+            material=document.material, kind="form"
         ).first()
         return render(request, "netbox_oa/maintenance/verify.html", {
             "order": order, "document": document, "data": document.form_data,
+            "service_effect_label": dict(SERVICE_EFFECTS).get(
+                document.form_data.get("service_effect"), "—"
+            ),
             "service_type_label": dict(
                 MaintenanceOrder._meta.get_field("service_type").choices
             ).get(document.form_data.get("service_type"), "—"),

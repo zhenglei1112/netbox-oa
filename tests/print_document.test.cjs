@@ -28,6 +28,7 @@ function setup(decode, count = 2, responses = [true], embedded = false) {
       createElement: () => ({setAttribute() {}, remove() {}}),
     },
     window: {
+      oaNotify(text) {handlers.feedback = {textContent: text};},
       addEventListener(name, fn) {handlers[name] = fn;},
       print() {assert.equal(active.size, count); handlers.beforeprint(); prints++;},
     },

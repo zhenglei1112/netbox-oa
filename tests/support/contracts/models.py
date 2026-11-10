@@ -12,11 +12,17 @@ class ServiceProvider(ChangeLoggedModel):
         return self.name
 
 
+class ContractType(ChangeLoggedModel):
+    name = models.CharField(max_length=100)
+
+
 class Contract(ChangeLoggedModel):
+    contract_type = models.ForeignKey(ContractType, null=True, blank=True, on_delete=models.PROTECT)
     name = models.CharField(max_length=100)
     number = models.CharField(max_length=100, blank=True)
     external_party_object = models.ForeignKey(ServiceProvider, on_delete=models.PROTECT)
     custom_field_data = models.JSONField(default=dict)
+    maintenance_pricing = models.JSONField(default=dict, blank=True)
 
 
 class Invoice(ChangeLoggedModel):

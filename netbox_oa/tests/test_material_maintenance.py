@@ -6,6 +6,7 @@ from django.urls import reverse
 from netbox_oa import maintenance_services as services
 from netbox_oa.models import MaintenanceDocument, MaintenanceEvent, MaintenanceOrder
 from netbox_oa.tests import test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 
 class MaterialMaintenanceTests(TestCase):
@@ -36,7 +37,7 @@ class MaterialMaintenanceTests(TestCase):
         return self.order.documents.get(replaces_document=document)
 
     def test_approval_replace_keeps_item_and_delete_removes_slot_not_history(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         first, second = self.upload("report"), self.upload("report")
         self.assertContains(self.review("report"), f"?replace={first.pk}")
         revised = self.replace(first)
@@ -55,21 +56,6 @@ class MaterialMaintenanceTests(TestCase):
         with self.assertRaises(ValidationError):
             services.remove_document(pk=first.pk, actor=self.actor)
 
-    def test_sealed_replace_preserves_approval_and_delete_requires_reupload(self):
-        self.reach("report_sealed_upload")
-        approved = services.material_scan_sources(self.order, "report").first()
-        sealed = self.upload("report", sealed=True)
-        revised = self.replace(sealed)
-        self.assertEqual(revised.source_document_id, approved.pk)
-        self.assertTrue(revised.is_sealed)
-        self.assertEqual(self.review("report").context["selected_group"]["documents"],
-                         [revised, approved])
-        with self.assertRaises(ValidationError):
-            services.remove_document(pk=approved.pk, actor=self.actor)
-        services.remove_document(pk=revised.pk, actor=self.actor)
-        self.assertEqual(self.review("report").context["selected_group"]["documents"], [approved])
-        with self.assertRaisesMessage(ValidationError, "用印扫描件"):
-            services.complete_task(pk=self.current().pk, actor=self.actor)
 
     def test_payment_attachment_replace_and_remove_do_not_revive_old_version(self):
         self.reach("payment_eip")
@@ -80,11 +66,11 @@ class MaterialMaintenanceTests(TestCase):
         services.remove_document(pk=revised.pk, actor=self.actor)
         self.assertEqual(self.review("notice").context["selected_group"]["documents"], [])
         with self.assertRaisesMessage(ValidationError, "付款通知书"):
-            services.complete_task(pk=self.current().pk, actor=self.actor,
+            services.complete_task(pk=self.current().pk, actor=acting_user(self),
                                    external_reference="EIP-001")
 
     def test_approval_phase_form_and_cross_order_targets_cannot_be_modified(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = self.upload("report")
         form = self.order.documents.get(kind="form", material="order")
         with self.assertRaises(ValidationError):
@@ -99,7 +85,7 @@ class MaterialMaintenanceTests(TestCase):
         self.assertNotContains(self.review("report"), "data-material-remove")
 
     def test_remove_requires_delete_permission_and_assignment_and_post(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = self.upload("report")
         user = self.worker("material_worker")
         for action in ("view", "add"):
@@ -117,7 +103,7 @@ class MaterialMaintenanceTests(TestCase):
         self.assertTrue(MaintenanceDocument.objects.filter(pk=document.pk).exists())
 
     def test_menu_hides_delete_action_without_permission(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = self.upload("report")
         user = self.worker("upload_only")
         for action in ("view", "add"):
@@ -139,16 +125,20 @@ class MaterialMaintenanceTests(TestCase):
         self.assertNotContains(page, "缺少材料删除权限")
 
     def test_return_delete_two_of_three_retains_original_for_resubmission(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         for material in ("report", "settlement"):
-            while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_fill":
+            while self.order.steps_snapshot[self.current().position]["key"] != "acceptance_apply":
                 self.complete()
             with self.subTest(material=material):
+                for previous in services.material_scan_candidates(self.order, material):
+                    services.remove_document(pk=previous.pk, actor=self.actor)
                 originals = [self.upload(material) for _ in range(3)]
                 self.complete()
-                services.return_task(pk=self.current().pk, actor=self.actor, comment="仅保留第一份")
+                services.return_task(
+                    pk=self.current().pk, actor=acting_user(self), comment="仅保留第一份",
+                )
                 with self.assertRaises(ValidationError):
-                    services.complete_task(pk=self.current().pk, actor=self.actor)
+                    services.complete_task(pk=self.current().pk, actor=acting_user(self))
                 for document in originals[1:]:
                     services.remove_document(pk=document.pk, actor=self.actor)
                 if material == "report":
@@ -166,13 +156,18 @@ class MaterialMaintenanceTests(TestCase):
                             if item["key"] == material)
                 self.assertTrue(item["stage_upload_complete"])
                 self.assertContains(response, "本阶段材料已调整 · 保留 1 份")
-                completed = services.complete_task(pk=self.current().pk, actor=self.actor)
+                self.upload("acceptance")
+                self.upload("settlement" if material == "report" else "report", "scan")
+                test_maintenance.sign_task(self.current(), acting_user(self))
+                completed = services.complete_task(pk=self.current().pk, actor=acting_user(self))
                 self.assertEqual(completed.evidence[material], [originals[0].pk])
                 # A subsequent return must require a new adjustment again.
-                services.return_task(pk=self.current().pk, actor=self.actor, comment="再次补正")
+                services.return_task(
+                    pk=self.current().pk, actor=acting_user(self), comment="再次补正",
+                )
                 with self.assertRaises(ValidationError):
-                    services.complete_task(pk=self.current().pk, actor=self.actor)
+                    services.complete_task(pk=self.current().pk, actor=acting_user(self))
                 services.remove_document(pk=originals[0].pk, actor=self.actor)
                 with self.assertRaisesMessage(ValidationError, "至少上传一份"):
-                    services.complete_task(pk=self.current().pk, actor=self.actor)
+                    services.complete_task(pk=self.current().pk, actor=acting_user(self))
                 self.upload(material)

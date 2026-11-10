@@ -1,0 +1,8 @@
+{% extends 'generic/object_edit.html' %}
+{% load form_helpers static %}
+{% block title %}维护服务结算单计费明细{% endblock %}
+{% block subtitle %}<p class="text-muted">{{ document.order.number }} · 费用明细</p>{% endblock %}
+{% block form %}
+{% include 'netbox_oa/maintenance/settlement_billing_fields.html' %}
+{% endblock %}
+{% block buttons %}<a class="btn btn-outline-secondary btn-float" href="{{ return_url }}">取消</a><button class="btn btn-primary" type="submit" {% if not rules %}disabled{% endif %}>保存</button>{% endblock %}

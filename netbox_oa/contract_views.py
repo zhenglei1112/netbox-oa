@@ -5,7 +5,17 @@ from importlib import import_module
 from django.apps import apps
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Q, prefetch_related_objects
+from django.db.models import (
+    Case,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+    When,
+    prefetch_related_objects,
+)
 from django.http import Http404
 from django.shortcuts import get_object_or_404, render
 from django.urls import NoReverseMatch, reverse
@@ -23,6 +33,26 @@ def contract_orders(user, contract_id):
     return MaintenanceOrder.objects.restrict(user, "view").filter(
         contract_id=contract_id
     ).select_related("requester").order_by("-created", "-pk")
+
+
+def with_payment_progress(orders, user):
+    """Match visible payments without issuing a separate query for every order."""
+    if not user.has_perm("netbox_contract.view_invoice"):
+        return orders.annotate(payment_progress=Value(-1, output_field=IntegerField()))
+    model = apps.get_model("netbox_contract", "Invoice")
+    ranks = {"计划": 1, "已提交": 2, "已支付": 3}
+    invoices = model.objects.restrict(user, "view").filter(
+        contracts=OuterRef("contract_id"), number__icontains=OuterRef("number"),
+    ).exclude(template=True).annotate(
+        progress=Case(
+            *(When(status=code, then=Value(rank)) for code, rank in ranks.items()),
+            default=Value(0), output_field=IntegerField(),
+        )
+    ).order_by("-progress", "pk")
+    return orders.annotate(
+        payment_progress=Subquery(invoices.values("progress")[:1]),
+        payment_multiple=Exists(invoices.order_by("pk")[1:2]),
+    )
 
 
 class ContractOrderMixin:
@@ -63,7 +93,7 @@ class ContractOrderPaymentsView(ContractOrderMixin, LoginRequiredMixin, View):
             raise PermissionDenied
         model = apps.get_model("netbox_contract", "Invoice")
         invoices = model.objects.restrict(request.user, "view").filter(
-            contracts=contract_id, number=order.number
+            contracts=contract_id, number__icontains=order.number
         ).exclude(template=True).distinct().order_by("pk").prefetch_related("contracts")
         module = import_module(f"{apps.get_app_config('netbox_contract').name}.tables")
         linked_faults = linked_payment_faults(request, contract_id, invoices)

@@ -35,8 +35,10 @@ function setup(withSources = false, withUpdates = false) {
     addEventListener(name, handler) {handlers[name] = handler;},
   };
   runInNewContext(source, {
+    window: {oaNotify() {}},
     document: {
-      querySelector: name => ['[data-upload-cancel]', '[data-upload-heading]'].includes(name) ? null
+      querySelector: name => ['[data-upload-cancel]', '[data-upload-heading]',
+        '[data-upload-form]', '[data-upload-loading]'].includes(name) ? null
         : name === '.oa-upload-mode select' ? mode
         : name === '.oa-upload-replacement select' ? revision
         : name === '.oa-upload-source select' ? original : name === '.oa-upload-drop' ? drop : {
@@ -52,6 +54,54 @@ function setup(withSources = false, withUpdates = false) {
   return {input, handlers, names: () => displayed, mappings, original, sourceContainer,
     mode, revision, revisionContainer};
 }
+
+function setupSubmission() {
+  const handlers = {};
+  const button = {disabled: false};
+  const loading = {hidden: true};
+  const attrs = {};
+  const form = {
+    querySelector(selector) {assert.equal(selector, 'button[type="submit"]'); return button;},
+    addEventListener(name, handler) {handlers[name] = handler;},
+    setAttribute(name, value) {attrs[name] = value;},
+    removeAttribute(name) {delete attrs[name];},
+  };
+  runInNewContext(source, {
+    document: {querySelector: selector => ({
+      '[data-upload-form]': form, '[data-upload-loading]': loading,
+    })[selector] || null},
+    window: {addEventListener(name, handler) {handlers[name] = handler;}},
+  });
+  return {handlers, button, loading, attrs};
+}
+
+test('upload shows the spinner, blocks duplicate submission and recovers on returning to the page', () => {
+  const page = setupSubmission();
+  let prevented = 0;
+  const event = {preventDefault() {prevented += 1;}};
+  page.handlers.submit(event);
+  assert.equal(page.loading.hidden, false);
+  assert.equal(page.button.disabled, true);
+  assert.equal(page.attrs['aria-busy'], 'true');
+  assert.equal(prevented, 0);
+  page.handlers.submit(event);
+  assert.equal(prevented, 1);
+  page.handlers.pageshow();
+  assert.equal(page.loading.hidden, true);
+  assert.equal(page.button.disabled, false);
+  assert.equal(page.attrs['aria-busy'], undefined);
+  page.handlers.submit(event);
+  assert.equal(page.loading.hidden, false);
+  assert.equal(prevented, 1);
+});
+
+test('a cancelled form submission does not enter the uploading state', () => {
+  const page = setupSubmission();
+  page.handlers.submit({defaultPrevented: true});
+  assert.equal(page.loading.hidden, true);
+  assert.equal(page.button.disabled, false);
+  assert.equal(page.attrs['aria-busy'], undefined);
+});
 
 test('selected filename is displayed as text and clears previous errors', () => {
   const page = setup();
@@ -109,11 +159,11 @@ test('new uploads have no replacement links and updates select a target per file
   assert.ok(page.mappings.every(choice => choice.name === 'replaces_document_ids'));
 });
 
-test('single-file service order rejects multiple dropped files', () => {
+test('single-file company form rejects multiple dropped files', () => {
   const page = setup();
   page.input.multiple = false;
   page.handlers.drop({preventDefault() {},
     dataTransfer: {files: [{name: 'one.pdf'}, {name: 'two.pdf'}]}});
   assert.equal(page.input.files.length, 0);
-  assert.equal(page.input.validity, '维护服务工单每次只能上传一个文件。');
+  assert.equal(page.input.validity, '此类材料每次只能上传一个文件。');
 });

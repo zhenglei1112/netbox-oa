@@ -12,6 +12,7 @@ from django import forms
 from django.apps import AppConfig
 
 SECRET_KEY = "local-tests-only"
+PLUGINS_CONFIG = {"netbox_oa": {"contract_type_number_codes": {"维护": "A", "其他": "B"}}}
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",

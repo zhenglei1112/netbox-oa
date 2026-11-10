@@ -1,9 +1,13 @@
 """Read external purchase contracts without a hard migration dependency on the plugin."""
 
+import re
+
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.urls import NoReverseMatch, reverse
+
+from . import DEFAULT_CONTRACT_TYPE_NUMBER_CODES
 
 
 def service_regions(actor):
@@ -37,7 +41,28 @@ def purchase_contracts(actor):
         model = apps.get_model("netbox_contract", "Contract")
     except LookupError:
         raise ValidationError("请先启用 netbox-contract，才能选择外购合同。") from None
-    return model.objects.restrict(actor, "view").order_by("number", "pk")
+    return model.objects.restrict(actor, "view").select_related("contract_type").order_by(
+        "number", "pk"
+    )
+
+
+def contract_type_snapshot(contract):
+    contract_type = contract.contract_type
+    if contract_type is None:
+        return {}
+    config = getattr(settings, "PLUGINS_CONFIG", {}).get("netbox_oa", {})
+    mapping = config.get("contract_type_number_codes", DEFAULT_CONTRACT_TYPE_NUMBER_CODES)
+    if not isinstance(mapping, dict):
+        raise ValidationError("合同类型编号代码配置必须为类型 ID 或名称与代码的映射。")
+    codes = [str(value).strip().upper() for value in mapping.values()]
+    if any(not re.fullmatch(r"[A-Z0-9]", code) for code in codes) or len(set(codes)) != len(codes):
+        raise ValidationError("合同类型编号代码须为互不重复的一位大写字母或数字。")
+    code = mapping.get(str(contract_type.pk), mapping.get(contract_type.name, ""))
+    return {
+        "id": contract_type.pk,
+        "name": contract_type.name,
+        "code": str(code).strip().upper(),
+    }
 
 
 def contract_values(contract, actor):
@@ -61,6 +86,7 @@ def contract_values(contract, actor):
             pass
     return {
         "contract_id": contract.pk,
+        "contract_type_snapshot": contract_type_snapshot(contract),
         "contract_number": contract.number or "",
         "supplier": str(contract.external_party_object or ""),
         "service_region": str(region or ""),
@@ -92,7 +118,8 @@ def selected_contract(actor, contract_id, service_region=None, service_region_id
 
 def order_object_links(order, actor):
     """Resolve object links from the accessible contract, keeping stored labels intact."""
-    result = {"supplier_url": "", "contract_url": ""}
+    result = {"supplier_url": "", "contract_url": "",
+              "current_contract_type": order.contract_type_snapshot}
     if not order.contract_id:
         return result
     try:
@@ -101,6 +128,7 @@ def order_object_links(order, actor):
         return result
     if contract is None:
         return result
+    result["current_contract_type"] = contract_type_snapshot(contract)
     try:
         result["contract_url"] = reverse(
             "plugins:netbox_contract:contract", args=[contract.pk]

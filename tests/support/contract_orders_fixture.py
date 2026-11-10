@@ -35,7 +35,7 @@ from netbox_oa.tests.test_contract_orders import ContractOrderTests  # noqa: E40
 call_command("migrate", verbosity=0, interactive=False, run_syncdb=True)
 fixture = ContractOrderTests()
 fixture.setUp()
-fixture.reach("report_fill")
+fixture.reach("acceptance_apply")
 for number in (1, 2):
     image = Image.new("RGB", (700, 990), "white")
     ImageDraw.Draw(image).text((40, 50), f"Service report {number}", fill="black")

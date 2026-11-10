@@ -17,6 +17,10 @@
   });
   history.scrollRestoration = "manual";
   const root = () => document.querySelector('.oa-inbox');
+  const showNavigationLoading = busy => {
+    const loading = root().querySelector('[data-oa-navigation-loading]');
+    if (loading) loading.hidden = !busy;
+  };
   const list = () => root().querySelector('.oa-order-list');
   const detail = () => root().querySelector('.oa-detail');
   const audit = () => root().querySelector('.oa-audit');
@@ -39,7 +43,7 @@
       oaAuditDialog: audit().querySelector('.oa-audit-dialog-scroll')?.scrollTop || 0, oaWindow: window.scrollY}, '', location.href);
   };
   const feedback = (message) => {
-    root().querySelector('.oa-feedback').textContent = message;
+    window.oaNotify?.(message);
   };
   const restore = (state = {}) => {
     state = state || {};
@@ -198,6 +202,7 @@
     const anchorTop = anchor?.getBoundingClientRect().top;
     if (!pop) savePosition();
     root().setAttribute('aria-busy', 'true');
+    showNavigationLoading(mode === 'all' || mode === 'detail');
     if (mode !== 'search') {
       detail().inert = true;
       audit().inert = true;
@@ -211,9 +216,9 @@
       if (!next || (!response.ok && ![400, 403].includes(response.status))) {
         throw new Error('page-unavailable');
       }
-      const versionSwitch = root().querySelector('[data-oa-version-switch]');
-      const nextSwitch = next.querySelector('[data-oa-version-switch]');
-      if (versionSwitch && nextSwitch) versionSwitch.href = nextSwitch.href;
+      window.oaNotifyPage?.(page);
+      const taskCompleted = method === 'POST' && response.ok
+        && Boolean(next.querySelector('[data-oa-task-completed]'));
       if (mode === 'search') {
         // Keep the input, caret, and any unfinished handling form in place.
         list().replaceWith(next.querySelector('.oa-order-list'));
@@ -253,7 +258,8 @@
         if (method === 'POST' || mode === 'search') history.replaceState(position, '', targetUrl);
         else history.pushState({}, '', targetUrl);
       }
-      restore(pop ? state : {...position, oaList: mode === 'search' ? 0 : position.oaList,
+      restore(taskCompleted ? {oaList: 0, oaDetail: 0, oaAudit: 0, oaAuditDialog: 0, oaWindow: 0}
+        : pop ? state : {...position, oaList: mode === 'search' ? 0 : position.oaList,
         oaDetail: mode === 'detail' ? 0 : position.oaDetail});
       if (mode === 'history' && anchorId) {
         const newAnchor = historyScroll().querySelector(`[data-event-id="${anchorId}"]`);
@@ -261,8 +267,12 @@
           const delta = newAnchor.getBoundingClientRect().top - anchorTop;
           historyScroll().scrollTop += delta;
         }
+      } else if (taskCompleted) {
+        const notice = detail();
+        notice.setAttribute('tabindex', '-1');
+        notice.focus({preventScroll: true});
       } else if (method === 'POST') {
-        const current = detail().querySelector('.oa-action-error, #oa-current');
+        const current = detail().querySelector('#oa-current');
         if (current) {
           current.setAttribute('tabindex', '-1');
           current.focus({preventScroll: true});
@@ -283,6 +293,7 @@
       if (requestSequence === sequence) {
         searchInFlight = false;
         root().removeAttribute('aria-busy');
+        showNavigationLoading(false);
         detail().inert = false;
         audit().inert = false;
         enhance();
@@ -301,6 +312,7 @@
       controller?.abort();
       sequence++;
       root().removeAttribute('aria-busy');
+      showNavigationLoading(false);
       detail().inert = false;
       audit().inert = false;
       root().classList.remove('oa-show-detail');

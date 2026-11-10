@@ -1,6 +1,7 @@
-"""Task-specific guidance for the optional v2 workbench (no workflow decisions)."""
+"""Task-specific guidance for the maintenance workbench (no workflow decisions)."""
 
 from .maintenance_flow import STAGES
+from .maintenance_materials import ACCEPTANCE_SIGNING_NODES
 
 
 def handling_guide(detail):
@@ -26,7 +27,7 @@ def handling_guide(detail):
             title = "按退回意见修正工单，重新签名后提交"
             steps = [
                 "查看审批经过中的退回原因，编辑工单内容。",
-                "申请人重新签名后提交，流程将重新经过初审和部门审核。",
+                "申请人重新签名后提交，流程将重新经过复核和部门审核。",
             ]
             tone = "submission"
         elif key in {"order_review", "order_final"}:
@@ -35,24 +36,34 @@ def handling_guide(detail):
                 "审阅服务事项、服务范围、合同及申请人签名。",
                 "完成本环节签名并填写意见；有问题可退回申请人补正。",
             ]
+        elif key == "acceptance_apply":
+            title = "填写验收单并上传验收附件"
+            steps = ["填写工单验收单，选择服务效果并填写结算金额。",
+                     "上传服务报告、服务结算单扫描件；这两类附件无需用印。",
+                     "完成本人手写签名后提交，修改验收单后须重新签名。"]
+            tone = "submission"
+        elif key in ACCEPTANCE_SIGNING_NODES:
+            title = "核对验收材料，完成本环节手写签名"
+            steps = ["核对工单验收单、服务报告和服务结算单。",
+                     "通过手机手写签名后同意；签名日期由系统记录，有问题可退回验收申请。"]
         elif key == "payment_plan":
-            title = "核对用印结算单，完善合同付款信息"
+            title = "核对用印验收单，完善合同付款信息"
             steps = [
-                "核对本次服务结算单及对应的用印扫描件。",
+                "核对本次验收单用印扫描件及服务结算单。",
                 "进入付款信息完成付款资料准备，再提交部门审核。",
             ]
             tone = "payment"
         elif key == "payment_review":
             title = "核对结算依据与付款信息，完成付款审核"
             steps = [
-                "比对用印结算单、合同及付款信息。",
+                "比对用印验收单、服务结算单、合同及付款信息。",
                 "核对无误后同意；需调整时退回生成付款环节。",
             ]
             tone = "payment"
         elif kind == "external":
             title = "准备付款附件，登记外部流程结果"
             steps = [
-                "上传付款通知书、电子发票、合同复印件和发票验真结果。",
+                "上传付款通知书和电子发票。",
                 "确认外部付款流程已通过，填写外部流程编号后登记。",
             ]
             tone = "payment"
@@ -67,14 +78,14 @@ def handling_guide(detail):
             title = "上传本次审批材料，核对后提交"
             steps = [
                 "上传乙方签章后的扫描件，核对内容、页数及签章是否完整。",
-                "维护服务工单保留一份；报告和结算单可多份，上传时明确新增或更新。",
+                "报告和结算单可多份，上传时明确新增或更新。",
                 "退回补正后须按本次要求更新材料，再提交审批。",
             ]
             tone = "submission"
         elif kind == "action" and key.endswith("_seal"):
             title = "按审批内容完成用印"
             steps = [
-                "查阅本次审批通过的扫描版本，按审批内容办理用印。",
+                "查阅本次审批通过的工单表单或扫描件，按审批内容办理用印。",
                 "确认用印完成后提交，交由发起流程的线路主管上传用印后材料。",
             ]
             tone = "seal"

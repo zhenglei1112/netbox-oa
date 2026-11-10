@@ -35,9 +35,11 @@
     const form = event.target.closest('[data-material-remove]');
     if (!form) return;
     event.preventDefault();
-    if (!window.confirm(`确定删除${form.dataset.materialName}？删除后不再计入当前材料，原文件和历史记录将保留。`)) return;
     const button = form.querySelector('button');
+    if (button.disabled) return;
     button.disabled = true;
+    const confirmed = await window.oaConfirm(`确定删除${form.dataset.materialName}？删除后不再计入当前材料，原文件和历史记录将保留。`);
+    if (!confirmed) {button.disabled = false; return;}
     try {
       const response = await fetch(form.action, {
         method: 'POST', credentials: 'same-origin', body: new FormData(form),
@@ -53,7 +55,7 @@
       url.searchParams.delete('document');
       location.replace(url.href);
     } catch (error) {
-      window.alert(error.message);
+      window.oaNotify?.(error.message);
       button.disabled = false;
     }
   });

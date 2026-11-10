@@ -2,15 +2,12 @@
 {% load static %}
 {% block title %}{{ flow_name }}{% endblock %}
 {% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
 <script src="{% static 'netbox_oa/flow_definition.js' %}" defer></script>
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
   <div><h1>{{ flow_name }}</h1><p class="text-muted mb-0">{{ stage_count }} 个阶段 · {{ node_count }} 个顺序环节 · {{ correction_count }} 个退回修正环节</p></div>
   <a class="btn btn-ghost-secondary" href="{% url 'plugins:netbox_oa:maintenance_workbench' %}">返回维护服务工单</a>
-</div>
-<div class="alert alert-info">
-  草稿填写、申请人签名后直接提交工单初审；工单初审或部门审核退回时进入工单修正，修订并重新签名后再送初审。新工单按以下流程办理；在途工单的环节与进度以各自审批记录为准。
-  付款申请组依次办理生成付款、付款部门审核、付款；登记外部付款申请后完成 OA 工单，不代表已付款或已收款。
 </div>
 <div class="card mb-3"><div class="card-body">
   <form method="get" class="d-flex align-items-end flex-wrap gap-3">
@@ -22,14 +19,24 @@
     </div><button class="btn btn-ghost-primary" type="submit">查看</button>
   </form>
   {% if policy %}<p class="mt-3 mb-0">当前配置：<strong>{{ policy.name }}</strong> · {% if policy.enabled %}启用{% else %}停用{% endif %} · 每节点时限 {{ sla_hours }} 小时 · 提前 {{ policy.warning_hours }} 小时预警</p>
-  {% else %}<p class="text-muted mt-3 mb-0">未选择配置，显示默认节点时限 {{ sla_hours }} 小时；实际时限和用户组以工单启动时选择的配置为准。</p>{% endif %}
+  {% else %}<p class="text-muted mt-3 mb-0">默认节点时限：{{ sla_hours }} 小时</p>{% endif %}
 </div></div>
 <details class="card mb-3"><summary class="card-header">查看处理角色与用户组</summary><div class="card-body">
   <div class="row">
     {% for role in roles %}<div class="col-md-4 mb-2"><strong>{{ role.name }}</strong>：{% if role.group %}{{ role.group.name }}{% elif policy %}<span class="text-warning">未配置</span>{% else %}<span class="text-muted">选择配置后查看</span>{% endif %}</div>{% endfor %}
-    <div class="col-md-4 mb-2"><strong>线路主管</strong>：每张工单指定的负责人</div>
-    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、服务工单、服务报告、服务结算单、三个用印后材料上传环节、生成付款</div>
+    <div class="col-md-4 mb-2"><strong>线路主管</strong>：每张工单指定的负责人，办理最后的付款申请登记</div>
+    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、验收申请、两个用印后材料上传环节、生成付款</div>
   </div>
+</div></details>
+<details class="card mb-3"><summary class="card-header">查看审批与材料规则</summary><div class="card-body">
+  <ul class="mb-0">
+    <li>发起人不能审批自己发起的工单，包括加签和管理员代办；须由其他有权限的审批人办理。用户组成员还须具有相应的工单查看和任务办理权限。</li>
+    <li>工单复核、工单部门审核、验收申请、验收复核、验收部门审核须完成本人手写签名后批转；工单公司审批和验收公司审批无需签名。验收复核使用初审人用户组。</li>
+    <li>维护服务工单和工单验收单各一份，修订保存新版本；服务报告和服务结算单允许多份，上传时明确新增或更新，更新保留份号和历史版本。</li>
+    <li>覆盖保留历史版本；删除须有材料删除权限，删除后旧版本不计入当前材料。</li>
+    <li>只有维护服务工单和工单验收单办理用印，用印件须关联本次审批的具体表单版本；审批原件、用印件和历史版本均可按权限查阅。</li>
+    <li>生成付款和付款部门审核时核对合同付款信息；最后登记外部付款申请单号。</li>
+  </ul>
 </div></details>
 <nav class="d-flex flex-wrap gap-2 mb-3" aria-label="流程阶段">
   {% for stage in stages %}<a class="btn btn-ghost-primary" href="#stage-{{ stage.key }}">{{ forloop.counter }}. {{ stage.name }}（{{ stage.nodes|length }}）</a>{% endfor %}
@@ -49,7 +56,7 @@
   <div class="oa-flow-viewport" tabindex="0" aria-label="流程图画布，可滚动查看">
     <svg class="oa-flow-svg" xmlns="http://www.w3.org/2000/svg" width="{{ diagram.width }}" height="{{ diagram.height }}" viewBox="0 0 {{ diagram.width }} {{ diagram.height }}" role="img" aria-labelledby="oa-flow-title oa-flow-desc">
       <title id="oa-flow-title">{{ flow_name }}流程图</title>
-      <desc id="oa-flow-desc">{{ node_count }} 个节点顺序执行。实线指向下一节点，红色虚线指向退回补正节点。节点详情在下方规则表中。</desc>
+      <desc id="oa-flow-desc">{{ stage_count }} 个阶段，{{ node_count }} 个顺序环节，{{ correction_count }} 个仅退回时进入的修正环节。实线指向下一节点，红色虚线指向退回补正节点。节点详情在下方规则表中。</desc>
       <defs>
         <marker id="oa-flow-next" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="oa-flow-arrow"/></marker>
         <marker id="oa-flow-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="oa-flow-back-arrow"/></marker>
@@ -85,5 +92,4 @@
   </table></div>
 </section>
 {% endfor %}
-<div class="alert alert-secondary">退回补正需填写原因。工单表单须修订保存；服务工单、服务报告和服务结算单须重新上传本次整组扫描原件并重新审批、用印。付款部门审核退回生成付款后，核对合同中的付款信息再提交，无需重传结算单。办理人可转办任务，内部审批支持加签。</div>
 {% endblock %}

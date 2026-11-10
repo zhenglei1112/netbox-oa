@@ -47,7 +47,7 @@ class ContractOrderTests(TestCase):
         })
 
     def test_superuser_material_page_is_always_readonly(self):
-        self.reach("report_fill")
+        self.reach("acceptance_apply")
         document = self.upload("report")
         self.client.force_login(self.actor)
         normal = self.client.get(reverse("plugins:netbox_oa:maintenance_review",
@@ -71,6 +71,12 @@ class ContractOrderTests(TestCase):
         self.client.force_login(self.actor)
         response = self.client.get(self.url("flow"))
         self.assertContains(response, "完整审批经过")
+        self.assertNotContains(response, "本工单启动时保存的流程快照")
+        self.assertNotContains(response, "不代表已付款或已收款")
+        self.assertEqual(
+            [lane["name"] for lane in response.context["detail"]["approval_diagram"]["lanes"]],
+            ["工单下单", "工单验收", "付款申请"],
+        )
         self.assertTemplateUsed(response, "netbox_oa/maintenance/inbox_approval_content.html")
         self.assertTemplateUsed(response, "netbox_oa/maintenance/inbox_activity_timeline.html")
         self.assertContains(response, "详细办理记录与意见")
@@ -148,6 +154,7 @@ class ContractOrderTests(TestCase):
         for index in range(28):
             copy = MaintenanceOrder.objects.get(pk=self.order.pk)
             copy.pk = None
+            copy.number_reservation_id = None
             copy.number = f"CONTRACT-TEST-{index:02}"
             copy.save()
             MaintenanceOrder.objects.filter(pk=copy.pk).update(
@@ -179,9 +186,158 @@ class ContractOrderTests(TestCase):
         )
         self.assertIn('class="btn btn-outline-primary"', html)
         self.assertIn('class="btn btn-outline-info"', html)
+        self.assertIn('class="btn-group dropdown"', html)
+        self.assertIn('data-bs-toggle="dropdown"', html)
+        self.assertIn('class="dropdown-menu dropdown-menu-end"', html)
+        self.assertIn('mdi mdi-history', html)
+        self.assertIn('Changelog</a>', html)
+        for row in table.paginated_rows:
+            self.assertIn(reverse("plugins:netbox_oa:maintenanceorder_changelog",
+                                  args=[row.record.pk]), html)
         self.assertNotIn('type="checkbox"', html)
         self.assertNotIn("btn-sm", html)
         self.assertNotIn('target="_blank"', html)
+
+    def test_changelog_route_uses_native_view_for_order(self):
+        from django.urls import resolve
+        from netbox.views import generic
+
+        url = reverse("plugins:netbox_oa:maintenanceorder_changelog", args=[self.order.pk])
+        match = resolve(url)
+        self.assertIs(match.func.view_class, generic.ObjectChangeLogView)
+        self.assertEqual(match.func.view_initkwargs, {
+            "base_template": "netbox_oa/maintenance/changelog.html",
+        })
+        self.assertEqual(match.kwargs, {"pk": self.order.pk, "model": MaintenanceOrder})
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.actor)
+        self.assertEqual(self.client.get(url).status_code, 204)
+        user = get_user_model().objects.create_user(username="no_order_changelog")
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_acceptance_amount_uses_latest_visible_active_form(self):
+        from django.utils import timezone
+
+        request = RequestFactory().get("/contract/")
+        request.user = self.actor
+
+        def cell():
+            table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+            rows = list(table.rows)
+            with self.assertNumQueries(0):
+                return rows[0].get_cell("acceptance_amount")
+
+        self.assertEqual(cell(), "—")
+        for version, amount in ((1, "100.10"), (2, "1234.56")):
+            latest = MaintenanceDocument.objects.create(
+                order=self.order, material="acceptance", kind="form", version=version,
+                form_data={"settlement_amount": amount}, uploaded_by=self.actor,
+                original_name="验收单",
+            )
+        self.assertEqual(cell(), "1,234.56")
+        latest.form_data = {"settlement_amount": "0"}
+        latest.save()
+        self.assertEqual(cell(), "0.00")
+        latest.form_data = {}
+        latest.save()
+        self.assertEqual(cell(), "—")
+        latest.removed_at = timezone.now()
+        latest.save()
+        self.assertEqual(cell(), "—")
+        queryset = type(MaintenanceDocument.objects.all())
+        original = queryset.restrict
+
+        def restrict(query, user, action):
+            visible = original(query, user, action)
+            return visible.none() if query.model is MaintenanceDocument else visible
+
+        with patch.object(queryset, "restrict", restrict):
+            self.assertEqual(cell(), "—")
+
+    def test_payment_progress_badges_and_multiple_matches(self):
+        from tests.support.contracts.models import Invoice
+
+        request = RequestFactory().get("/contract/")
+        request.user = self.actor
+
+        def cell():
+            table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+            return table.rows[0].get_cell("payment_progress")
+
+        self.assertIn('title="未纳入付款"', cell())
+        for status, color in (("计划", "warning"), ("已提交", "info"), ("已支付", "success")):
+            invoice = Invoice.objects.create(
+                number="付款-" + self.order.number.lower() + "-第一期", amount=100, status=status,
+            )
+            invoice.contracts.add(self.contract)
+            html = cell()
+            self.assertIn(f'title="已纳入付款（{status}）"', html)
+            self.assertIn(f'class="badge text-bg-{color}"', html)
+            self.assertIn(f'>{status}</span>', html)
+            self.assertNotIn('mdi mdi-check"', html)
+            invoice.delete()
+        # Multiple payments override their individual states, including equal states.
+        invoice = Invoice.objects.create(number=self.order.number, amount=100, status="计划")
+        invoice.contracts.add(self.contract)
+        second = Invoice.objects.create(number=self.order.number + "-第二期", amount=100)
+        second.contracts.add(self.contract)
+        for status in ("计划", "已提交", "已支付"):
+            second.status = status
+            second.save()
+            html = cell()
+            self.assertIn('title="存在多笔付款"', html)
+            self.assertIn('aria-label="存在多笔付款"', html)
+            self.assertIn("mdi-help-circle-outline", html)
+            self.assertNotIn('mdi mdi-check"', html)
+        second.delete()
+        self.assertIn('title="已纳入付款（计划）"', cell())
+
+    def test_payment_progress_excludes_templates_other_contracts_and_unrelated_names(self):
+        from tests.support.contracts.models import Invoice
+
+        invoice = Invoice.objects.create(number=self.order.number, amount=100, status="已支付")
+        template = Invoice.objects.create(
+            number=self.order.number, amount=100, status="已支付", template=True,
+        )
+        template.contracts.add(self.contract)
+        unrelated = Invoice.objects.create(number="不相关付款", amount=100, status="已支付")
+        unrelated.contracts.add(self.contract)
+        request = RequestFactory().get("/contract/")
+        request.user = self.actor
+        table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+        self.assertIn('title="未纳入付款"', table.rows[0].get_cell("payment_progress"))
+        invoice.contracts.add(self.contract)
+        table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+        self.assertIn('title="已纳入付款（已支付）"', table.rows[0].get_cell("payment_progress"))
+        queryset = type(Invoice.objects.all())
+        original = queryset.restrict
+
+        def restrict(query, user, action):
+            visible = original(query, user, action)
+            return visible.exclude(pk=invoice.pk) if query.model is Invoice else visible
+
+        with patch.object(queryset, "restrict", restrict):
+            table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+            self.assertIn('title="未纳入付款"', table.rows[0].get_cell("payment_progress"))
+
+    def test_payment_progress_without_invoice_permission_does_not_imply_unpaid(self):
+        user = self.worker("order_without_invoice_access")
+        request = RequestFactory().get("/contract/")
+        request.user = user
+        table = contract_order_table(request, contract_orders(user, self.contract.pk))
+        html = table.rows[0].get_cell("payment_progress")
+        self.assertIn('title="无付款查看权限"', html)
+        self.assertNotIn("未纳入付款", html)
+
+    def test_payment_progress_renders_without_per_row_queries(self):
+        request = RequestFactory().get("/contract/")
+        request.user = self.actor
+        table = contract_order_table(request, contract_orders(self.actor, self.contract.pk))
+        rows = list(table.rows)
+        with self.assertNumQueries(0):
+            for row in rows:
+                self.assertIn('title="未纳入付款"', row.get_cell("payment_progress"))
 
     def test_empty_list_and_no_permission(self):
         request = RequestFactory().get("/contract/")
@@ -192,12 +348,21 @@ class ContractOrderTests(TestCase):
         request.user = get_user_model().objects.create_user(username="no_oa")
         self.assertEqual(extension.right_page(), "")
 
-    def test_payment_filter_matches_exact_number_and_contract(self):
+    def test_payment_filter_matches_contained_number_and_contract(self):
         from tests.support.contracts.models import Invoice
 
         match = Invoice.objects.create(number=self.order.number, amount=100)
         match.contracts.add(self.contract)
-        other = Invoice.objects.create(number=self.order.number + "-other", amount=200)
+        matches = [match]
+        for number in (
+            self.order.number + "-第一期",
+            "付款-" + self.order.number,
+            "付款-" + self.order.number.lower() + "-第二期",
+        ):
+            invoice = Invoice.objects.create(number=number, amount=200)
+            invoice.contracts.add(self.contract)
+            matches.append(invoice)
+        other = Invoice.objects.create(number="不相关付款", amount=200)
         other.contracts.add(self.contract)
         Invoice.objects.create(number=self.order.number, amount=300)
         template = Invoice.objects.create(number=self.order.number, amount=400, template=True)
@@ -209,7 +374,8 @@ class ContractOrderTests(TestCase):
         )):
             response = self.client.get(self.url("payments"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(list(response.context["table"].data), [match])
+        self.assertEqual(list(response.context["table"].data), matches)
+        self.assertContains(response, "付款名称包含：")
         self.assertContains(response, "清除筛选")
         self.assertContains(response, self.order.number)
         self.assertNotContains(response, other.number)

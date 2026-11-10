@@ -1,0 +1,15 @@
+{% if record.payment_progress == -1 %}
+<span class="text-muted text-nowrap" title="无付款查看权限" role="img" aria-label="无付款查看权限"><i class="mdi mdi-lock-outline" aria-hidden="true"></i></span>
+{% elif record.payment_multiple %}
+<span class="text-warning text-nowrap" title="存在多笔付款" role="img" aria-label="存在多笔付款"><i class="mdi mdi-help-circle-outline" aria-hidden="true"></i></span>
+{% elif record.payment_progress == None %}
+<span class="text-muted text-nowrap" title="未纳入付款" role="img" aria-label="未纳入付款"><i class="mdi mdi-minus-circle-outline" aria-hidden="true"></i></span>
+{% elif record.payment_progress == 1 %}
+<span class="badge text-bg-warning" title="已纳入付款（计划）">计划</span>
+{% elif record.payment_progress == 2 %}
+<span class="badge text-bg-info" title="已纳入付款（已提交）">已提交</span>
+{% elif record.payment_progress == 3 %}
+<span class="badge text-bg-success" title="已纳入付款（已支付）">已支付</span>
+{% else %}
+<span class="text-muted text-nowrap" title="已纳入付款（其他状态）" role="img" aria-label="已纳入付款（其他状态）"><i class="mdi mdi-information-outline" aria-hidden="true"></i></span>
+{% endif %}

@@ -1,8 +1,8 @@
 {% if detail.can_act %}
 <dialog class="oa-panel" id="routing" aria-labelledby="oa-routing-title" {% if panel_id == 'routing' %}open{% endif %}>
   <header class="oa-panel-header"><div><span class="oa-eyebrow">{{ detail.current.name }}</span><h2 id="oa-routing-title">转办{% if detail.current.kind == 'approval' %} / 加签{% endif %}</h2></div><a class="btn btn-ghost-secondary oa-close" data-oa-close href="{{ detail_url }}" aria-label="关闭转办及加签">×</a></header>
-  <div class="oa-panel-body"><p class="oa-panel-note">选择办理人并填写原因。转办将改变当前办理人；加签会在当前审核后增加一个审核节点。</p>
-    {% if action_error and panel_id == 'routing' %}<p class="oa-action-error" role="alert">{{ action_error }}</p>{% endif %}
+  <div class="oa-panel-body"><p class="oa-panel-note">转办更换办理人；加签在当前审核后增加审核节点。</p>
+    {% if action_error and panel_id == 'routing' %}<p class="oa-action-error" data-oa-notice="danger" role="alert">{{ action_error }}</p>{% endif %}
     <form class="oa-routing-form" data-oa-action method="post" action="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='transfer' %}">{% csrf_token %}<input type="hidden" name="return_query" value="{{ return_query }}"><input type="hidden" name="return_panel" value="routing">
       {{ routing_form.user_id.as_field_group }}{{ routing_form.comment.as_field_group }}
       <div class="oa-panel-actions"><button type="submit" class="btn btn-primary">确认转办</button>{% if detail.current.kind == 'approval' %}<button type="submit" class="btn btn-ghost-primary" formaction="{% url 'plugins:netbox_oa:maintenancetask_action' pk=detail.current.pk operation='countersign' %}">追加加签</button>{% endif %}</div>

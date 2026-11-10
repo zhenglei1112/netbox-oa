@@ -1,0 +1,7 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}{{ object }} · Changelog{% endblock %}
+
+{% block control-buttons %}
+  <a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenanceorder' pk=object.pk %}"><i class="mdi mdi-arrow-left" aria-hidden="true"></i> 返回工单办理</a>
+{% endblock %}

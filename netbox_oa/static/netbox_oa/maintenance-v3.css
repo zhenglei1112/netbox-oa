@@ -1,9 +1,0 @@
-/* Signature imagery and its dialog only; layout and controls use native NetBox styles. */
-.oa-signature-value { display: inline-flex; align-items: flex-start; gap: 4px; }
-.oa-signature-value[hidden], .oa-signature-add[hidden] { display: none; }
-.oa-signature-value img, .v3-signature-history { width: 180px; height: 65px; object-fit: contain; background: white; }
-.oa-signature-dialog { border: 1px solid var(--bs-border-color); border-radius: var(--bs-border-radius); background: var(--bs-body-bg); color: var(--bs-body-color); padding: 56px 24px 20px; text-align: center; max-width: 320px; }
-.oa-signature-dialog::backdrop { background: #0005; }
-.oa-signature-dialog, .oa-signature-dialog * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.oa-signature-dialog img { display: block; margin: auto; background: white; }
-.oa-signature-close { position: absolute; top: 8px; right: 10px; }

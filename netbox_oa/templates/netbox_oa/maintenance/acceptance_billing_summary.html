@@ -1,0 +1,8 @@
+<section class="card mb-4" aria-label="费用明细">
+  <div class="card-header"><h2 class="card-title">费用明细</h2></div>
+  <div class="card-body">
+    {% if billing_data.lines %}
+      {% include 'netbox_oa/maintenance/settlement_billing_table.html' with billing=billing_data %}
+    {% else %}<p class="text-muted mb-0">暂无费用明细。</p>{% endif %}
+  </div>
+</section>

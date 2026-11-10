@@ -25,6 +25,7 @@ test('mobile canvas captures strokes, clears ink and submits a PNG only after dr
     createElement: () => ({getContext: () => ({drawImage(){}})}),
   };
   vm.runInNewContext(fs.readFileSync('netbox_oa/static/netbox_oa/maintenance-signature.js','utf8'), {
+    window: {oaNotify(message) {error.textContent = message;}},
     document, ResizeObserver:class{constructor(callback){resized=callback;} observe(){}}
   });
   assert.equal(canvas.style.width,'360px');

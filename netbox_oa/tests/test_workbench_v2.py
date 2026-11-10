@@ -1,4 +1,4 @@
-"""The alternate workbench must use the same permissions and workflow actions."""
+"""The sole workbench uses v2 permissions, forms and workflow actions."""
 
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from netbox_oa.tests import test_draft_submission, test_maintenance
+from netbox_oa.tests.test_maintenance import acting_user
 
 
 class WorkbenchV2Tests(TestCase):
@@ -22,33 +23,41 @@ class WorkbenchV2Tests(TestCase):
     worker = test_maintenance.MaintenanceTests.worker
 
     def page(self, **params):
-        self.client.force_login(self.actor)
+        self.client.force_login(acting_user(self))
         return self.client.get(
             reverse("plugins:netbox_oa:maintenance_workbench_v2"),
             {"tab": "all", "selected": self.order.pk, **params},
         )
 
-    def test_original_and_v2_are_separate_and_preserve_selection(self):
-        response = self.page(q=self.order.number)
-        self.assertTemplateUsed(response, "netbox_oa/maintenance/workbench_v2.html")
-        self.assertContains(response, "快捷办理")
-        self.assertContains(response, "申请人签名")
-        self.assertEqual(parse_qs(response.context["return_query"])["ui"], ["v2"])
-        for tab in response.context["tabs"]:
-            self.assertIn("/maintenance/v2/", tab["url"])
-        old = self.client.get(response.context["version_switch_url"])
-        self.assertTemplateUsed(old, "netbox_oa/maintenance/workbench.html")
-        self.assertNotContains(old, 'class="oa-v2-workspace"')
-        self.assertEqual(old.context["detail"]["order"].pk, self.order.pk)
+    def test_all_entrypoints_use_v2_without_version_switches(self):
+        self.page()
+        for url in (reverse("plugins:netbox_oa:maintenance_workbench"),
+                    reverse("plugins:netbox_oa:maintenance_workbench_v2"),
+                    self.order.get_absolute_url()):
+            response = self.client.get(url, {"tab": "all", "selected": self.order.pk})
+            self.assertTemplateUsed(response, "netbox_oa/maintenance/workbench_v2.html")
+            self.assertContains(response, "快捷办理")
+            self.assertContains(response, "申请人签名")
+            self.assertNotContains(response, "data-oa-version-switch")
+            self.assertNotIn("version_switch_url", response.context)
+            self.assertNotIn("ui", parse_qs(response.context["return_query"]))
+            self.assertEqual(response.context["detail"]["order"].pk, self.order.pk)
+        for path in ("/plugins/oa/maintenance/v3/",
+                     f"/plugins/oa/maintenance/v3/orders/{self.order.pk}/"):
+            self.assertEqual(self.client.get(path).status_code, 404)
+        for version in ("v1", "v3"):
+            response = self.page(ui=version)
+            self.assertTemplateUsed(response, "netbox_oa/maintenance/workbench_v2.html")
+            self.assertNotContains(response, "data-oa-version-switch")
 
-    def test_both_workbenches_link_supplier_and_contract(self):
+    def test_workbench_links_supplier_and_contract(self):
         from tests.support.contracts.models import ServiceProvider
 
         with patch.object(
             ServiceProvider, "get_absolute_url", return_value="/providers/1/", create=True
         ):
             response = self.page()
-            original = self.client.get(response.context["version_switch_url"])
+            original = self.client.get(self.order.get_absolute_url())
         contract_url = reverse("plugins:netbox_contract:contract", args=[self.contract.pk])
         for page in (response, original):
             self.assertContains(page, f'<a href="/providers/1/">{self.order.supplier}</a>')
@@ -87,7 +96,7 @@ class WorkbenchV2Tests(TestCase):
             if key == "payment_eip":
                 self.assertContains(response, 'name="external_reference"')
             self.complete()
-        self.assertEqual(len(seen), 20)
+        self.assertEqual(len(seen), 14)
         response = self.page()
         self.assertNotContains(response, 'class="oa-actions"')
         self.assertContains(response, "工单资料库")
@@ -98,7 +107,7 @@ class WorkbenchV2Tests(TestCase):
         self.page()
         task = self.current()
         url = reverse("plugins:netbox_oa:maintenancetask_action", args=[task.pk, "return"])
-        response = self.client.post(url, {"comment": "", "return_query": "ui=v2&tab=all"})
+        response = self.client.post(url, {"comment": "x" * 4001, "return_query": "ui=v2&tab=all"})
         self.assertEqual(response.status_code, 400)
         self.assertTemplateUsed(response, "netbox_oa/maintenance/workbench_v2.html")
         response = self.client.post(
@@ -107,6 +116,14 @@ class WorkbenchV2Tests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/maintenance/v2/", response.url)
         response = self.client.get(response.url)
+        self.assertEqual(response.context["tab"], "all")
+        self.assertEqual(response.context["total"], 1)
+        self.assertEqual(response.context["detail"]["order"].pk, self.order.pk)
+        self.assertFalse(response.context["outside_list"])
+        response = self.client.get(
+            reverse("plugins:netbox_oa:maintenance_workbench_v2"), {"tab": "delegate"}
+        )
+        self.assertEqual(response.context["total"], 1)
         self.assertContains(response, "按退回意见修正工单")
         self.assertContains(response, "请补充服务范围")
 
@@ -124,7 +141,7 @@ class WorkbenchV2Tests(TestCase):
 
     def test_draft_edit_sign_and_submit_keep_v2(self):
         self.page()
-        url = reverse("plugins:netbox_oa:maintenanceorder_edit", args=[self.order.pk]) + "?ui=v2"
+        url = reverse("plugins:netbox_oa:maintenanceorder_edit", args=[self.order.pk])
         response = self.client.get(url)
         self.assertIn("/maintenance/v2/", response.context["return_url"])
         self.assertEqual(response.context["signature_save_url"], url)

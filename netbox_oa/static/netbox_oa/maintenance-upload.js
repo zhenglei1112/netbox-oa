@@ -1,4 +1,27 @@
 (() => {
+  const form = document.querySelector('[data-upload-form]');
+  const loading = document.querySelector('[data-upload-loading]');
+  if (form && loading) {
+    const submit = form.querySelector('button[type="submit"]');
+    let uploading = false;
+    form.addEventListener('submit', event => {
+      if (event.defaultPrevented) return;
+      if (uploading) {
+        event.preventDefault();
+        return;
+      }
+      uploading = true;
+      form.setAttribute('aria-busy', 'true');
+      loading.hidden = false;
+      if (submit) submit.disabled = true;
+    });
+    window.addEventListener('pageshow', () => {
+      uploading = false;
+      form.removeAttribute('aria-busy');
+      loading.hidden = true;
+      if (submit) submit.disabled = false;
+    });
+  }
   document.querySelector('[data-upload-cancel]')?.addEventListener('click', event => {
     if (window.parent === window) return;
     event.preventDefault();
@@ -62,8 +85,8 @@
       if (!input.multiple) break;
     }
     if (!input.multiple && event.dataTransfer.files.length > 1) {
-      input.setCustomValidity('维护服务工单每次只能上传一个文件。');
-      input.reportValidity();
+      input.setCustomValidity('此类材料每次只能上传一个文件。');
+      window.oaNotify?.('此类材料每次只能上传一个文件。');
       return;
     }
     input.files = transfer.files;

@@ -1,3 +1,4 @@
+
 """Draft signing and submission through the current production workflow."""
 
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from netbox_oa import maintenance_services as services
 from netbox_oa import maintenance_signatures as signing
 from netbox_oa.models import MaintenanceOrder, MaintenanceSignature
 from netbox_oa.tests import test_maintenance, test_ordering
+from netbox_oa.tests.test_maintenance import acting_user
 from netbox_oa.tests.test_signatures import image_data
 
 
@@ -131,7 +133,7 @@ class DraftSubmissionTests(TestCase):
         printed = self.client.get(reverse("plugins:netbox_oa:maintenance_print", args=[latest.pk]))
         self.assertContains(printed, "紧急程度")
         self.assertNotContains(printed, "验收情况 / 甲方意见")
-        self.assertContains(printed, '<th>初审</th>', html=True)
+        self.assertContains(printed, '<th>复核</th>', html=True)
         self.assertContains(printed, '<th>部门审核</th>', html=True)
         self.assertContains(printed, 'colspan="4" class="seal-cell"')
         self.assertContains(printed, "<strong>甲方：中交信通网络科技有限公司</strong>", html=True)
@@ -141,16 +143,16 @@ class DraftSubmissionTests(TestCase):
 
     def test_full_current_flow_starts_at_review_and_never_visits_correction(self):
         signature = self.start()
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
         self.assertEqual(
-            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 20
+            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 14
         )
         self.assertNotIn("order_fill", [n["key"] for n in self.order.steps_snapshot])
         while self.order.tasks.filter(status="pending").exists():
             self.complete()
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, "completed")
-        self.assertEqual(self.order.tasks.count(), 20)
+        self.assertEqual(self.order.tasks.count(), 14)
         self.assertFalse(self.order.tasks.filter(name="工单修正").exists())
         signature.refresh_from_db()
         self.assertIsNotNone(signature.submitted_at)
@@ -198,7 +200,7 @@ class DraftSubmissionTests(TestCase):
         self.assertEqual(response.status_code, 302, response.content)
         order.refresh_from_db()
         self.assertEqual(order.status, "active")
-        self.assertEqual(order.tasks.get(status="pending").name, "工单初审")
+        self.assertEqual(order.tasks.get(status="pending").name, "工单复核")
         self.assertEqual(order.documents.count(), 1)
         self.assertEqual(MaintenanceOrder.objects.count(), 2)
         response = self.client.post(
@@ -236,20 +238,23 @@ class DraftSubmissionTests(TestCase):
         original = self.start()
         for position in ("order_review", "order_final"):
             if position == "order_final":
-                services.complete_task(pk=self.current().pk, actor=self.actor)
-            services.return_task(pk=self.current().pk, actor=self.actor, comment="请修正内容")
+                test_maintenance.sign_task(self.current(), acting_user(self))
+                services.complete_task(pk=self.current().pk, actor=acting_user(self))
+            services.return_task(
+                pk=self.current().pk, actor=acting_user(self), comment="请修正内容",
+            )
             self.assertEqual(self.current().name, "工单修正")
             self.order.refresh_from_db()
             self.assertEqual(self.order.status, "active")
             self.assertEqual(self.current().assigned_user_id, self.order.requester_id)
             with self.assertRaisesMessage(ValidationError, "退回补正后必须"):
-                services.complete_task(pk=self.current().pk, actor=self.actor)
+                services.complete_task(pk=self.current().pk, actor=acting_user(self))
             self.upload("order")
             with self.assertRaisesMessage(ValidationError, "申请人完成手写签名"):
-                services.complete_task(pk=self.current().pk, actor=self.actor)
+                services.complete_task(pk=self.current().pk, actor=acting_user(self))
             signature = test_maintenance.sign_task(self.current())
-            services.complete_task(pk=self.current().pk, actor=self.actor)
-            self.assertEqual(self.current().name, "工单初审")
+            services.complete_task(pk=self.current().pk, actor=acting_user(self))
+            self.assertEqual(self.current().name, "工单复核")
             printed = self.client.get(
                 reverse("plugins:netbox_oa:maintenance_print", args=[signature.document_id])
             )
@@ -272,7 +277,7 @@ class DraftSubmissionTests(TestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, "draft")
         self.assertEqual(api.post(url, {}).status_code, 200)
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
         signature.refresh_from_db()
         self.assertIsNotNone(signature.submitted_at)
 
@@ -332,11 +337,13 @@ class DraftSubmissionTests(TestCase):
         self.assertEqual(self.client.post(desktop_url).status_code, 302)
         services.start_order(pk=self.order.pk, actor=self.actor)
         self.assertEqual(viewer_client.get(image_url).status_code, 200)
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
 
     def test_correction_edit_page_saves_signs_and_resubmits_directly_to_review(self):
         original = self.start()
-        services.return_task(pk=self.current().pk, actor=self.actor, comment="请补充服务位置")
+        services.return_task(
+            pk=self.current().pk, actor=acting_user(self), comment="请补充服务位置",
+        )
         workbench = self.client.get(self.order.get_absolute_url())
         self.assertContains(workbench, 'aria-label="编辑"')
         self.assertContains(
@@ -364,7 +371,7 @@ class DraftSubmissionTests(TestCase):
             url, {**data, "expected_document_id": document_id, "_submit": "1"}
         )
         self.assertEqual(response.status_code, 302, response.content)
-        self.assertEqual(self.current().name, "工单初审")
+        self.assertEqual(self.current().name, "工单复核")
         self.assertEqual(self.order.documents.filter(kind="form").count(), 2)
         original_print = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[original.document_id])

@@ -8,5 +8,6 @@
 <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
 </head>
-<body class="oa-upload-embedded">{% block content %}{% endblock %}</body>
+<body class="oa-upload-embedded">{% block content %}
+{% include 'netbox_oa/inc/notifications.html' %}{% endblock %}</body>
 </html>

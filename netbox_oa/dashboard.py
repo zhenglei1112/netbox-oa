@@ -11,12 +11,12 @@ from .models import MaintenanceOrder
 @register_widget
 class MaintenanceTodoWidget(DashboardWidget):
     default_title = "工单待办"
-    description = "分别显示当前账号的待办、可代办工单和个人草稿数量，点击进入工单 V2。"
+    description = "分别显示当前账号的待办、可代办工单和个人草稿数量，点击进入工单办理。"
     width = 2
     height = 2
 
     def render(self, request):
-        from .maintenance_views import actionable_tasks
+        from .maintenance_views import actionable_tasks, personal_todo_tasks
 
         pending_count = 0
         delegated_count = 0
@@ -26,10 +26,11 @@ class MaintenanceTodoWidget(DashboardWidget):
             assigned = Q(assigned_user=request.user) | Q(
                 assigned_user__isnull=True, assigned_group__in=request.user.groups.all()
             )
-            pending_count = tasks.filter(assigned).values(
+            personal = personal_todo_tasks(request.user, tasks)
+            pending_count = personal.values(
                 "order_id"
             ).distinct().count()
-            delegated_count = tasks.exclude(assigned).values(
+            delegated_count = tasks.exclude(assigned).exclude(pk__in=personal.values("pk")).values(
                 "order_id"
             ).distinct().count()
             draft_count = MaintenanceOrder.objects.restrict(request.user, "view").filter(
@@ -68,9 +69,7 @@ class MaintenanceTodoListWidget(DashboardWidget):
                 rows.append({
                     "task": task,
                     "comment": quick_complete_comment(task),
-                    "detail_url": reverse(
-                        "plugins:netbox_oa:maintenance_v3_detail", args=[task.order_id],
-                    ),
+                    "detail_url": task.order.get_absolute_url(),
                 })
         return render_to_string(
             "netbox_oa/inc/dashboard_todo_list_widget.html", {"rows": rows}, request=request,

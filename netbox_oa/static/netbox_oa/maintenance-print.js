@@ -3,19 +3,13 @@
   const settings = button?.dataset.auditUrl ? button.dataset : document.body.dataset;
   if (!settings.auditUrl) return;
   let codes = [];
-  let feedback;
   let printRequest;
   const clear = () => {
     for (const code of codes) code.remove();
     codes = [];
   };
   function report(text) {
-    feedback?.remove();
-    feedback = document.createElement('span');
-    feedback.setAttribute('role', 'alert');
-    feedback.textContent = text;
-    if (button) button.after(feedback);
-    else document.body.append(feedback);
+    window.oaNotify?.(text);
   }
   function recordPrint() {
     if (!printRequest) {
@@ -35,7 +29,6 @@
   }));
   button?.addEventListener('click', async () => {
     clear();
-    feedback?.remove();
     button.disabled = true;
     let errorText = '打印码加载失败，请重新点击打印。';
     try {

@@ -25,8 +25,7 @@
     } catch (exception) {
       checkbox.checked = false;
       checkbox.disabled = false;
-      error.textContent = exception.message || '办理失败，请刷新页面后重试。';
-      error.classList.remove('d-none');
+      window.oaNotify?.(exception.message || '办理失败，请刷新页面后重试。');
     }
   });
 })();
