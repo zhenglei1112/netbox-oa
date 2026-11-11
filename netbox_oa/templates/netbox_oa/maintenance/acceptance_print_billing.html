@@ -5,7 +5,7 @@
     {% for line in item.billing_data.lines %}<tr class="billing-row">
       <td colspan="1">{{ forloop.counter }}</td><td colspan="3">{{ line.name }}</td>
       <td colspan="4">{{ line.started_at|oa_datetime }}<br>至<br>{{ line.ended_at|oa_datetime }}</td>
-      <td colspan="4">{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %}<br>单价 {{ line.unit_price }} 元{% if line.rule.method == 'duration' %}<br>服务时长 {{ line.hours }} 小时{% endif %}</td>
+      <td colspan="4">{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %}<br>单价 {{ line.unit_price }} 元{% if line.rule.method == 'duration' %}<br>服务时长 {{ line.hours|duration_hours }}{% endif %}</td>
       <td colspan="2">{{ line.quantity }} {{ line.unit }}</td><td colspan="2">{{ line.gross }}</td><td colspan="2">{{ line.deduction }}</td><td colspan="2">{{ line.net }}</td>
     </tr>{% endfor %}
 {% endfor %}

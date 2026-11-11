@@ -58,7 +58,7 @@ class MaterialMaintenanceTests(TestCase):
 
 
     def test_payment_attachment_replace_and_remove_do_not_revive_old_version(self):
-        self.reach("payment_eip")
+        self.reach("payment_plan")
         first = self.upload("notice")
         revised = self.replace(first)
         self.assertEqual(revised.item_number, first.item_number)

@@ -273,7 +273,9 @@ class OrderingTests(TestCase):
         nodes = preview.context["stages"][0]["nodes"]
         self.assertEqual(nodes[0]["group"].pk, replacement.pk)
         self.assertEqual(nodes[1]["group"].pk, replacement.pk)
-        self.assertEqual(nodes[0]["role_label"], "初审人")
+        self.assertEqual(nodes[0]["role_label"], "复核人")
+        self.assertContains(preview, "复核人")
+        self.assertNotContains(preview, "初审人")
         self.assertEqual(nodes[1]["role_label"], "部门负责人")
 
     def test_contract_keeps_number_and_supplier_but_allows_manual_region(self):

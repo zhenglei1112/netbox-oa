@@ -8,7 +8,7 @@ STAGES = (
     ("payment", "付款申请"),
 )
 ROLES = (
-    ("reviewer", "初审人"),
+    ("reviewer", "复核人"),
     ("department", "部门负责人"),
     ("senior", "上级负责人"),
     ("seal", "印章管理人"),
@@ -134,7 +134,8 @@ def build_steps(groups, sla_hours):
         "生成付款",
         "submission",
         "requester",
-        required=(("acceptance", "sealed"), ("settlement", "scan")),
+        required=(("acceptance", "sealed"), ("settlement", "scan"),
+                  ("notice", "electronic"), ("invoice", "electronic")),
     )
     add(
         "payment",
@@ -142,7 +143,8 @@ def build_steps(groups, sla_hours):
         "付款部门审核",
         "approval",
         "department",
-        required=(("acceptance", "sealed"), ("settlement", "scan")),
+        required=(("acceptance", "sealed"), ("settlement", "scan"),
+                  ("notice", "electronic"), ("invoice", "electronic")),
         return_to="payment_plan",
         payment="submitted",
     )
@@ -156,7 +158,6 @@ def build_steps(groups, sla_hours):
         "payment_eip",
         "付款",
         "external",
-        required=(("notice", "electronic"), ("invoice", "electronic")),
         payment="requested",
     )
     return nodes

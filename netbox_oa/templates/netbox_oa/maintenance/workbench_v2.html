@@ -7,10 +7,10 @@
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-upload.css' %}">
 <script src="{% static 'netbox_oa/maintenance-upload-modal.js' %}" defer></script>
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance.css' %}?v=20261023-3">
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-activity.css' %}?v=20261110-3">
 <link rel="stylesheet" href="{% static 'netbox_oa/flow_definition.css' %}">
 <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-approval.css' %}?v=20261105-2">
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-v2.css' %}?v=20261105-1">
+<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-v2.css' %}?v=20261111-1">
 <div class="oa-workbench oa-inbox oa-industrial oa-v2 {% if mobile_detail %}oa-show-detail{% endif %}" data-detail-url="{{ detail_url }}" data-list-url="{{ list_url }}">
   <div class="oa-upload-loading" data-oa-navigation-loading role="status" aria-label="正在加载工单" hidden><span class="spinner-border text-primary" aria-hidden="true"></span></div>
   <header class="oa-heading">
@@ -61,13 +61,15 @@
         {% for stage in guide.stages %}<li class="{{ stage.state }}" {% if stage.state == 'current' %}aria-current="step"{% endif %}><span>{{ forloop.counter }}</span>{{ stage.label }}{% if stage.state == 'current' %}<small>当前</small>{% endif %}</li>{% endfor %}
       </ol>
       {% if action_error %}<div class="oa-action-error" data-oa-notice="danger" role="alert">{{ action_error }}{% if not detail.can_act and action_form.is_bound %}<p>你填写的意见：{{ action_form.comment.value|default:'（未填写）' }}</p>{% endif %}</div>{% endif %}
-      <section class="oa-v2-guide" aria-label="本环节办理提醒">
-        <header class="oa-v2-guide-heading"><strong>{% if detail.current %}{{ detail.current.name }}{% else %}{{ detail.order.get_status_display }}{% endif %}</strong><span class="oa-v2-guide-status">{{ detail.status_label }}</span></header>
+      <section class="oa-v2-guide{% if guide_collapsed %} oa-guide-collapsed{% endif %}" aria-label="本环节办理提醒">
+        <header class="oa-v2-guide-heading"><strong>{% if detail.current %}{{ detail.current.name }}{% else %}{{ detail.order.get_status_display }}{% endif %}</strong><span class="oa-v2-guide-status">{{ detail.status_label }}</span><form method="post" action="{% url 'plugins:netbox_oa:maintenance_guide_preference' %}" data-oa-guide-preference>{% csrf_token %}<button class="btn btn-ghost-secondary" type="button" data-oa-guide-toggle aria-expanded="{% if guide_collapsed %}false{% else %}true{% endif %}" aria-controls="oa-guide-content" title="{% if guide_collapsed %}展开办理提醒{% else %}收起办理提醒{% endif %}" aria-label="{% if guide_collapsed %}展开办理提醒{% else %}收起办理提醒{% endif %}"><i class="mdi mdi-chevron-{% if guide_collapsed %}down{% else %}up{% endif %}" aria-hidden="true"></i></button></form></header>
+        <div id="oa-guide-content"{% if guide_collapsed %} hidden{% endif %}>
         {% if guide.steps %}<div class="oa-v2-guide-body">
           <h3>{{ guide.title }}</h3>
           <ol>{% for step in guide.steps %}<li><span class="oa-v2-guide-number" aria-hidden="true">{{ forloop.counter }}</span><span>{{ step }}</span></li>{% endfor %}</ol>
         </div>{% endif %}
         {% if detail.current %}<footer class="oa-v2-assignee"><span>办理人 / 组：{{ detail.waiting_for }}</span><span>已等待 {{ detail.waiting }}{% if detail.deadline_state == 'overdue' %}<strong class="text-danger"> · 已超时</strong>{% elif detail.deadline_state == 'warning' %}<strong class="text-warning"> · 即将超时</strong>{% endif %}</span></footer>{% endif %}
+        </div>
       </section>
       <div class="oa-v2-workspace">
         <div class="oa-v2-evidence">
@@ -104,6 +106,6 @@
     {% include 'netbox_oa/maintenance/inbox_activity.html' %}
   </div>
 </div>
-<script src="{% static 'netbox_oa/maintenance-inbox.js' %}?v=20261023-1" defer></script>
+<script src="{% static 'netbox_oa/maintenance-inbox.js' %}?v=20261111-2" defer></script>
 <script src="{% static 'netbox_oa/maintenance-signature-widget.js' %}?v=20261018-2" defer></script>
 {% endblock %}

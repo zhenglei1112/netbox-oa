@@ -109,10 +109,10 @@ class VerificationTests(TestCase):
         response = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
         )
-        self.assertContains(response, "2026-10-16 10:32:00")
-        self.assertContains(response, "2026-10-16", count=2)
-        self.assertNotContains(response, "2026年10月16日")
-        self.assertContains(response, "____-__-__")
+        self.assertContains(response, "2026年10月16日", count=2)
+        self.assertNotContains(response, "2026-10-16")
+        self.assertNotContains(response, "10:32")
+        self.assertContains(response, "____年__月__日")
         document.refresh_from_db()
         self.assertEqual(document.form_data["signature_date"], "2026-10-16")
 

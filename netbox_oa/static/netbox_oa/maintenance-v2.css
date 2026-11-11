@@ -1,8 +1,10 @@
 /* The v2 layout shares native controls and dialogs with the original workbench. */
 .oa-inbox.oa-industrial.oa-v2 > .oa-columns {
-  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) var(--oa-v2-audit-width, 300px);
   gap: 16px;
 }
+.oa-inbox.oa-industrial.oa-v2.oa-audit-compact > .oa-columns { --oa-v2-audit-width: 50px; }
+.oa-inbox.oa-industrial.oa-v2.oa-audit-wide > .oa-columns { --oa-v2-audit-width: 300px; }
 .oa-v2 .oa-heading { align-items: center; }
 .oa-v2 .oa-heading .badge { vertical-align: middle; }
 .oa-v2 .oa-tabs { gap: 10px; }
@@ -24,8 +26,13 @@
   flex-shrink: 0; margin-bottom: 24px; overflow: hidden;
   color: var(--bs-body-color, var(--tblr-body-color));
   background: var(--tblr-bg-surface, var(--bs-body-bg)); }
-.oa-v2-guide-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+.oa-v2-guide-heading { display: flex; align-items: center; flex-wrap: nowrap; gap: 10px;
   padding: 14px 20px; border-bottom: 1px solid var(--oa-border); }
+.oa-v2-guide-heading > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oa-v2-guide-status { flex-shrink: 0; white-space: nowrap; }
+.oa-v2-guide-heading form { margin: 0 0 0 auto; flex-shrink: 0; }
+.oa-guide-collapsed .oa-v2-guide-heading { border-bottom: 0; }
+.oa-v2 .oa-detail { scrollbar-gutter: stable; }
 .oa-v2-guide-status, .oa-v2-guide-number {
   color: var(--bs-primary-text-emphasis, var(--oa-accent)); background: var(--oa-soft); }
 .oa-v2-guide-status { border-radius: 4px; padding: 2px 8px; font-size: .75rem; font-weight: 600; }
@@ -66,14 +73,14 @@
 }
 @container oa-workbench (max-width: 1239px) {
   .oa-inbox.oa-industrial.oa-v2 > .oa-columns {
-    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) 72px;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) var(--oa-v2-audit-width, 50px);
   }
 }
 @container oa-workbench (max-width: 760px) {
-  .oa-inbox.oa-industrial.oa-v2 > .oa-columns { grid-template-columns: minmax(0, 1fr) 72px; height: auto; min-height: 0; }
+  .oa-inbox.oa-industrial.oa-v2 > .oa-columns { grid-template-columns: minmax(0, 1fr) 50px; height: auto; min-height: 0; }
 }
 @media (max-width: 1000px) {
-  .oa-inbox.oa-industrial.oa-v2 > .oa-columns { grid-template-columns: minmax(0, 1fr) 72px; height: auto; min-height: 0; }
+  .oa-inbox.oa-industrial.oa-v2 > .oa-columns { grid-template-columns: minmax(0, 1fr) 50px; height: auto; min-height: 0; }
   .oa-v2-workspace { grid-template-columns: minmax(0, 1fr); }
   .oa-v2-handle { position: static; }
 }

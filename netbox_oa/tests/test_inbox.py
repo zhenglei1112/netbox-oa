@@ -125,18 +125,36 @@ class InboxTests(TestCase):
         self.grant(colleague, "maintenancetask", "view")
         self.assertEqual(self.page(actor=colleague, tab="done").context["total"], 0)
 
-    def test_payment_plan_stays_in_todo_instead_of_pending_payment(self):
+    def test_payment_plan_moves_from_todo_to_pending_payment(self):
         self.reach("payment_plan")
-        self.assertEqual(self.page(actor=self.actor, tab="pending_payment").context["total"], 0)
-        response = self.page(actor=self.actor, tab="todo")
+        response = self.page(actor=self.actor, tab="pending_payment")
         self.assertEqual([row["order"].pk for row in response.context["rows"]], [self.order.pk])
         counts = {item["key"]: item["count"] for item in response.context["tabs"]}
-        self.assertEqual(counts["pending_payment"], 0)
-        self.assertEqual(counts["todo"], 1)
+        self.assertEqual(counts["pending_payment"], 1)
+        self.assertEqual(counts["todo"], 0)
+        self.assertEqual(self.page(actor=self.actor, tab="todo").context["total"], 0)
+        self.assertEqual(self.page(actor=self.approver, tab="pending_payment").context["total"], 0)
+        for params in ({"q": "missing"}, {"stage": "ordering"}, {"node": "付款部门审核"}):
+            with self.subTest(params=params):
+                self.assertEqual(self.page(actor=self.actor, tab="pending_payment",
+                                           **params).context["total"], 0)
         legacy = self.page(actor=self.actor, tab="pending_payment_application")
         self.assertEqual(legacy.context["tab"], "todo")
-        self.assertEqual(legacy.context["total"], 1)
+        self.assertEqual(legacy.context["total"], 0)
         self.complete()
+        self.assertEqual(self.page(actor=self.actor, tab="pending_payment").context["total"], 0)
+
+    def test_pending_payment_uses_requester_and_snapshot_key(self):
+        self.reach("payment_plan")
+        MaintenanceOrder.objects.filter(pk=self.order.pk).update(owner=self.approver)
+        self.order.tasks.filter(pk=self.current().pk).update(name="自定义付款节点名称")
+        self.assertEqual(self.page(actor=self.actor, tab="pending_payment").context["total"], 1)
+        self.assertEqual(self.page(actor=self.approver, tab="pending_payment").context["total"], 0)
+        services.transfer_task(pk=self.current().pk, actor=self.actor,
+                               user_id=self.approver.pk, comment="交办付款资料准备")
+        self.assertEqual(self.page(actor=self.actor, tab="pending_payment").context["total"], 1)
+        self.assertEqual(self.page(actor=self.approver, tab="todo").context["total"], 1)
+        services.terminate_order(pk=self.order.pk, actor=self.actor, comment="停止办理")
         self.assertEqual(self.page(actor=self.actor, tab="pending_payment").context["total"], 0)
 
     def test_pending_payment_tab_only_lists_requesters_payment_step(self):
@@ -281,10 +299,10 @@ class InboxTests(TestCase):
                 self.assertIn('aria-label="查看"', card)
 
     def test_payment_error_shows_every_missing_material_without_state_explanation(self):
-        self.reach("payment_eip")
+        self.reach("payment_plan")
         page = self.page()
-        self.assertContains(page, "外部付款申请单号")
-        self.assertContains(page, "登记付款申请已提交")
+        self.assertContains(page, "提交资料")
+        self.assertNotContains(page, "外部付款申请单号")
         self.assertNotContains(page, "不代表已付款或已收款")
         self.assertNotContains(page, "登记外部流程已通过")
         response = self.action("complete", {"external_reference": "EIP-001"})
@@ -519,7 +537,7 @@ class InboxTests(TestCase):
 
     def test_attachment_upload_notice_does_not_count_earlier_task_uploads(self):
         self.upload("notice")
-        self.reach("payment_eip")
+        self.reach("payment_plan")
         response = self.page()
         material = next(item for item in response.context["detail"]["materials"]
                         if item["key"] == "notice")
@@ -557,7 +575,7 @@ class InboxTests(TestCase):
 
 
     def test_dedicated_upload_page_handles_attachments_and_hides_other_nodes(self):
-        self.reach("payment_eip")
+        self.reach("payment_plan")
         self.client.force_login(self.actor)
         url = reverse("plugins:netbox_oa:maintenance_material_upload",
                       args=[self.order.pk, "notice"])
@@ -1271,6 +1289,48 @@ class InboxTests(TestCase):
         self.assertEqual(len(icons), 2)
         self.assertTrue(all(attrs.get("aria-label") for attrs in icons))
 
+    def test_compact_activity_labels_and_complete_hover_details(self):
+        from netbox_oa.templatetags.oa_filters import activity_initial
+
+        for name, expected in (
+            ("工单复核", "复"), ("工单部门审核", "部"), ("工单公司审批", "司"),
+            ("服务工单用印", "印"), ("上传用户后服务工单", "传"), ("验收申请", "申"),
+            ("生成付款", "申"), ("付款", "款"), ("工单修正", "修"), ("发起流程", "申"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(activity_initial(name), expected)
+        self.start()
+        self.complete()
+        event = MaintenanceEvent.objects.filter(order=self.order, action="complete").latest("pk")
+        event.actor.first_name = "赵明"
+        event.actor.last_name = ""
+        event.actor.save()
+        event.details = {"comment": "完整意见<保留>", "external_reference": "EIP-123"}
+        event.save()
+        for index in range(7):
+            MaintenanceEvent.objects.create(
+                order=self.order, actor=self.actor, action="transfer",
+                description=f"转办记录 {index}",
+            )
+        response = self.page()
+        elements = PanelMarkup(response.content.decode()).elements
+        icons = [attrs for tag, attrs in elements if tag == "a" and "data-oa-event" in attrs]
+        self.assertGreater(len(icons), 6)
+        self.assertEqual(len(icons), len(response.context["detail"]["sidebar_events"]))
+        target = next(attrs for attrs in icons if attrs["data-oa-event"] == str(event.pk))
+        self.assertIn("完整意见<保留>", target["title"])
+        self.assertIn("EIP-123", target["title"])
+        item = next(item for item in response.context["detail"]["sidebar_events"]
+                    if item["event"].pk == event.pk)
+        self.assertEqual(item["actor_full_name"], "赵明")
+        self.assertIn("赵明", target["title"])
+        compact = response.content.decode().split('<nav class="oa-audit-icons"', 1)[1]
+        compact = compact.split('</nav>', 1)[0]
+        self.assertNotIn('oa-audit-symbol', compact)
+        self.assertNotIn('actor_initial', compact)
+        self.assertIn('oa-audit-icon-records', compact)
+        self.assertContains(response, 'data-oa-audit-toggle', count=2)
+
     def test_full_activity_uses_horizontal_nodes_and_keeps_comments_and_event_targets(self):
         self.start()
         completed = self.current()
@@ -1456,3 +1516,16 @@ class InboxTests(TestCase):
         self.assertEqual(
             self.order.events.filter(action="signature").count(), existing_signatures + 3
         )
+
+    def test_waiting_duration_matches_in_list_and_detail(self):
+        self.start()
+        now = timezone.now()
+        MaintenanceTask.objects.filter(pk=self.current().pk).update(
+            created=now - timedelta(hours=158, minutes=24, seconds=30),
+            deadline=now - timedelta(days=1),
+        )
+        with patch("netbox_oa.maintenance_presentation.timezone.now", return_value=now):
+            response = self.page()
+        self.assertEqual(response.context["rows"][0]["waiting"], "6天14小时24分钟")
+        self.assertEqual(response.context["detail"]["waiting"], "6天14小时24分钟")
+        self.assertContains(response, "6天14小时24分钟", count=2)

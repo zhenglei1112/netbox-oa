@@ -190,6 +190,12 @@ class AcceptanceTests(TestCase):
                      "申请人"):
             self.assertContains(page, text)
         self.assertEqual(len(page.context["signatures"]), 3)
+        from netbox_oa.templatetags.oa_filters import chinese_date
+
+        self.assertContains(page, chinese_date(page.context["requested_at"]))
+        for signature in page.context["signatures"].values():
+            self.assertContains(page, chinese_date(signature["date"]))
+            self.assertNotContains(page, signature["date"])
         self.assertContains(page, "data:image/svg+xml;base64,", count=2)
         verification = reverse("plugins:netbox_oa:maintenance_verify", args=[form.pk])
         self.assertContains(page, verification)

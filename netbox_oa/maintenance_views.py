@@ -185,6 +185,8 @@ def presentation(
             )
             or required_states.get(key) in {"scan", "sealed"}
         )
+        if key in {"notice", "invoice"}:
+            can_upload_now = node.get("key") == "payment_plan"
         can_upload_now = can_upload_now and key in dict(MATERIALS)
         current = summary["current"]
         stage_upload_required = bool(
@@ -458,6 +460,11 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                         if step_key == "payment_plan"
                         else "点击付款信息进入外购合同详情页，核对付款信息后审核"
                     )
+                    rules.append(
+                        "上传付款通知书、电子发票，材料齐备后提交部门审核"
+                        if step_key == "payment_plan"
+                        else "查阅付款通知书、电子发票；需修改时退回生成付款"
+                    )
                 elif step.get("scan_material"):
                     material_key = step["scan_material"]
                     material_name = dict(MATERIALS)[material_key]
@@ -478,9 +485,7 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                         **step,
                         "position": "修正" if step.get("return_only") else normal_position,
                         "kind_label": kinds[step["kind"]],
-                        "role_label": (
-                            "复核人" if step_key == "acceptance_review" else roles[step["role"]]
-                        ),
+                        "role_label": roles[step["role"]],
                         "group": groups.get(step["role"]),
                         "materials": [
                             f"{dict(MATERIALS)[material]} · "
@@ -551,6 +556,18 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
         )
 
 
+GUIDE_COLLAPSED_CONFIG = "plugins.netbox_oa.workbench.guide_collapsed"
+
+
+class MaintenanceGuidePreferenceView(LoginRequiredMixin, View):
+    def post(self, request):
+        collapsed = request.POST.get("collapsed")
+        if collapsed not in {"true", "false"}:
+            return JsonResponse({"error": "无效的收起状态。"}, status=400)
+        request.user.config.set(GUIDE_COLLAPSED_CONFIG, collapsed == "true", commit=True)
+        return JsonResponse({"collapsed": collapsed == "true"})
+
+
 class MaintenanceWorkbenchView(LoginRequiredMixin, View):
     def get(self, request, pk=None, action_form=None, action_error="", status=200):
         orders = MaintenanceOrder.objects.restrict(request.user, "view").select_related(
@@ -564,9 +581,10 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
         # Read the frozen workflow key rather than relying on editable task names.
         pending_payment_ids = [
             order_id for order_id, position, steps in orders.filter(
-                status="active", stage="payment"
+                status="active", stage="payment", requester=request.user
             ).values_list("pk", "current_position", "steps_snapshot")
-            if 0 <= position < len(steps) and steps[position].get("key") == "payment_eip"
+            if 0 <= position < len(steps)
+            and steps[position].get("key") in {"payment_plan", "payment_eip"}
         ]
         tab = request.GET.get("tab", "todo")
         if tab == "mine":
@@ -672,6 +690,8 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             ("following", "关注"),
             ("all", "全部"),
         ):
+            if key == "all" and not request.user.is_superuser:
+                continue
             params = query_params.copy()
             params["tab"] = key
             tabs.append({
@@ -730,6 +750,9 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             "total": filtered.count(),
         }
         context["workbench_url"] = base_url
+        context["guide_collapsed"] = getattr(request.user, "config", {}).get(
+            GUIDE_COLLAPSED_CONFIG, False
+        ) is True
         context["guide"] = handling_guide(context["detail"])
         response = render(
             request, "netbox_oa/maintenance/workbench_v2.html", context, status=status

@@ -8,6 +8,8 @@ from . import maintenance_views as views
 from .models import MaintenanceOrder
 
 urlpatterns = [
+    path("maintenance/preferences/guide/",
+         views.MaintenanceGuidePreferenceView.as_view(), name="maintenance_guide_preference"),
     path("maintenance/orders/<int:pk>/settlement-billing/new/",
          billing_views.SettlementBillingCreateView.as_view(), name="settlement_billing_create"),
     path("maintenance/orders/<int:pk>/settlement-billing/",

@@ -509,6 +509,11 @@ def _materials(order, node):
         return ids
     scan_material = node.get("scan_material")
     if scan_material:
+        remaining_ids = _materials(order, {
+            **node, "scan_material": None,
+            "required": [(material, state) for material, state in node["required"]
+                         if material != scan_material],
+        })
         label = dict(MATERIALS)[scan_material]
         scans = list(material_scan_sources(order, scan_material))
         if scan_material == "order" and not scans:
@@ -534,8 +539,8 @@ def _materials(order, node):
                 raise ValidationError(
                     f"请上传每份{label}的用印扫描件，尚缺：{'、'.join(missing)}。"
                 )
-            return {scan_material: sealed}
-        return {scan_material: [scan.pk for scan in scans]}
+            return {**remaining_ids, scan_material: sealed}
+        return {**remaining_ids, scan_material: [scan.pk for scan in scans]}
     ids = {}
     missing = []
     errors = []
@@ -1006,6 +1011,8 @@ def upload_document(
         }
         if material not in stage_material[order.stage]:
             raise ValidationError("只能提交当前阶段的材料，已完成阶段的材料保持不变。")
+        if material in {"notice", "invoice"} and node["key"] != "payment_plan":
+            raise ValidationError("付款通知书和电子发票只能在生成付款环节上传。")
         # A revised electronic source must go back through review; later nodes only accept scans.
         if current.kind != "submission" and node["key"] != "payment_eip" and state == "electronic":
             raise ValidationError("修改电子版内容请先退回填报节点。")

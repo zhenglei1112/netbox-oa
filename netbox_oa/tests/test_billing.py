@@ -192,7 +192,7 @@ class SettlementBillingTests(TestCase):
         self.assertContains(page, "48芯以上")
         self.assertContains(page, "2026-09-04 06:00:00")
         self.assertContains(page, "2026-09-04 15:30:00")
-        self.assertContains(page, "服务时长 9.5 小时")
+        self.assertContains(page, "服务时长 9小时30分钟")
         self.assertContains(page, "合计（元）：24220.00")
         self.assertNotContains(page, "11990.00")
         html = page.content.decode()

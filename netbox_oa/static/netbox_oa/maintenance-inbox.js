@@ -1,13 +1,53 @@
 /* Progressive enhancement: the server remains the source of truth for every action. */
 (() => {
   if (!document.querySelector('.oa-inbox')) return;
+  // NetBox boosted navigation can execute this script again in the same document.
+  window.oaInboxCleanup?.();
+  const listeners = [];
+  const listen = (target, ...args) => {
+    target.addEventListener(...args);
+    listeners.push(() => target.removeEventListener(...args));
+  };
+  let active = true;
   let controller;
   let sequence = 0;
   let posting = false;
   let pendingPop;
   let searchTimer;
   let searchInFlight = false;
-  window.addEventListener('message', event => {
+  let auditMode = null;
+  let guideCollapsed = null;
+  let guideSaving = false;
+  const applyGuideMode = () => {
+    if (!active) return;
+    for (const button of root().querySelectorAll('[data-oa-guide-toggle]')) {
+      if (guideCollapsed === null) guideCollapsed = button.getAttribute('aria-expanded') === 'false';
+      const guide = button.closest('.oa-v2-guide');
+      const label = guideCollapsed ? '展开办理提醒' : '收起办理提醒';
+      guide.classList.toggle('oa-guide-collapsed', guideCollapsed);
+      guide.querySelector('#oa-guide-content').hidden = guideCollapsed;
+      button.setAttribute('aria-expanded', String(!guideCollapsed));
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      button.disabled = guideSaving;
+      button.querySelector('i').className = `mdi mdi-chevron-${guideCollapsed ? 'down' : 'up'}`;
+    }
+  };
+  const applyAuditMode = () => {
+    root().classList.toggle('oa-audit-compact', auditMode === 'compact');
+    root().classList.toggle('oa-audit-wide', auditMode === 'wide');
+    const compact = auditMode === 'compact' || (auditMode !== 'wide'
+      && (root().clientWidth <= 1239 || window.matchMedia('(max-width: 1000px)').matches));
+    for (const button of root().querySelectorAll('[data-oa-audit-toggle]')) {
+      const label = compact ? '展开审批经过' : '切换紧凑模式';
+      button.setAttribute('aria-pressed', String(compact));
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      button.querySelector('i').className = `mdi mdi-arrow-${compact ? 'expand' : 'collapse'}-horizontal`;
+    }
+  };
+  listen(window, 'resize', applyAuditMode);
+  listen(window, 'message', event => {
     if (event.origin !== location.origin || event.data?.type !== 'oa-review-ready') return;
     for (const frame of root().querySelectorAll('[data-review-src]')) {
       if (event.source !== frame.contentWindow) continue;
@@ -35,8 +75,8 @@
     root().style.setProperty('--oa-workbench-offset', `${offset}px`);
   };
   const workspaceObserver = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(fitWorkspace) : null;
-  window.addEventListener('resize', fitWorkspace);
+    ? new ResizeObserver(() => {fitWorkspace(); applyAuditMode();}) : null;
+  listen(window, 'resize', fitWorkspace);
   const savePosition = () => {
     history.replaceState({...history.state, oaList: list().scrollTop,
       oaDetail: detail().scrollTop, oaAudit: auditScroll().scrollTop,
@@ -70,6 +110,8 @@
 
   function enhance() {
     root().classList.add('oa-enhanced');
+    applyAuditMode();
+    applyGuideMode();
     fitWorkspace();
     workspaceObserver?.disconnect();
     workspaceObserver?.observe(root());
@@ -96,14 +138,46 @@
     }
     document.documentElement.classList.toggle('oa-panel-open', Boolean(root().querySelector('dialog[open]')));
   }
-  document.addEventListener('close', (event) => {
+  listen(document, 'close', (event) => {
     if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-panel') && !root().querySelector('dialog[open]')) {
       document.documentElement.classList.remove('oa-panel-open');
     }
   }, true);
-  document.addEventListener('click', (event) => {
+  listen(document, 'click', (event) => {
     if (typeof event.target?.closest !== 'function') return;
+    const guideToggle = event.target.closest('.oa-inbox [data-oa-guide-toggle]');
+    if (guideToggle) {
+      event.preventDefault();
+      if (guideSaving) return;
+      const previous = guideCollapsed;
+      guideCollapsed = !guideCollapsed;
+      guideSaving = true;
+      const form = guideToggle.closest('form');
+      const body = new FormData(form);
+      body.set('collapsed', String(guideCollapsed));
+      applyGuideMode();
+      fetch(form.action, {method: 'POST', body, credentials: 'same-origin',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}})
+        .then(response => {
+          if (!response.ok || response.redirected) throw new Error('preference-unavailable');
+        })
+        .catch(() => {
+          if (!active) return;
+          guideCollapsed = previous;
+          feedback('办理提醒的显示模式保存失败，请重试。');
+        })
+        .finally(() => {guideSaving = false; applyGuideMode();});
+      return;
+    }
+    const auditToggle = event.target.closest('.oa-inbox [data-oa-audit-toggle]');
+    if (auditToggle) {
+      event.preventDefault();
+      auditMode = auditToggle.getAttribute('aria-pressed') === 'true' ? 'wide' : 'compact';
+      applyAuditMode();
+      root().querySelector(`${auditMode === 'compact' ? '.oa-audit-icons' : '.oa-audit-expanded'} [data-oa-audit-toggle]`).focus({preventScroll: true});
+      return;
+    }
     const trigger = event.target.closest('.oa-inbox [data-oa-open], .oa-inbox [data-oa-close], .oa-inbox [data-oa-tab]');
     if (!trigger || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button) return;
     if (trigger.hasAttribute('data-oa-tab')) {
@@ -139,7 +213,7 @@
       }
     }
   });
-  document.addEventListener('keydown', (event) => {
+  listen(document, 'keydown', (event) => {
     if (typeof event.target?.closest !== 'function') return;
     const link = event.target.closest('[data-oa-tab]');
     if (!link || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -150,7 +224,7 @@
       : (tabs.indexOf(link) + offset + tabs.length) % tabs.length;
     activateTab(tabs[index], true);
   });
-  document.addEventListener('change', (event) => {
+  listen(document, 'change', (event) => {
     const input = event.target;
     if (typeof input?.matches !== 'function') return;
     if (!input.matches('.oa-file-drop input[type=file]')) return;
@@ -172,17 +246,17 @@
       if (input.isConnected && !posting) input.form.requestSubmit();
     }, 300);
   }
-  document.addEventListener('input', event => {
+  listen(document, 'input', event => {
     if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) {
       queueSearch(event.target, event.isComposing);
     }
   });
-  document.addEventListener('compositionstart', event => {
+  listen(document, 'compositionstart', event => {
     if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) queueSearch(event.target, true);
   });
-  document.addEventListener('compositionend', event => {
+  listen(document, 'compositionend', event => {
     if (typeof event.target?.matches !== 'function') return;
     if (event.target.matches('.oa-inbox .oa-filters [name="q"]')) queueSearch(event.target);
   });
@@ -300,7 +374,7 @@
       }
     }
   }
-  document.addEventListener('click', (event) => {
+  listen(document, 'click', (event) => {
     if (typeof event.target?.closest !== 'function') return;
     const link = event.target.closest('.oa-inbox a[data-oa-select], .oa-inbox a[data-oa-nav], .oa-inbox a[data-oa-history], .oa-inbox a[data-oa-back]');
     if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button) return;
@@ -323,7 +397,7 @@
     navigate(link.href, {mode: link.hasAttribute('data-oa-select') ? 'detail'
       : link.hasAttribute('data-oa-history') ? 'history' : 'all'});
   });
-  document.addEventListener('submit', async (event) => {
+  listen(document, 'submit', async (event) => {
     const form = event.target;
     if (typeof form?.matches !== 'function') return;
       if (event.submitter?.hasAttribute('data-oa-native')) return;
@@ -355,7 +429,7 @@
       }
     }
   });
-  window.addEventListener('popstate', (event) => {
+  listen(window, 'popstate', (event) => {
     // A POST must finish before its result is replaced by history navigation.
     if (posting) {
       pendingPop = {url: location.href, state: event.state};
@@ -363,7 +437,7 @@
     }
     navigate(location.href, {pop: true, state: event.state});
   });
-  document.addEventListener('oa-upload-complete', async () => {
+  listen(document, 'oa-upload-complete', async () => {
     const panel = root().querySelector('dialog[open]');
     const panelId = panel?.id;
     const reviewSource = panel?.querySelector('[data-review-src]')?.src;
@@ -382,12 +456,21 @@
       document.documentElement.classList.add('oa-panel-open');
     }
   });
-  window.addEventListener('pagehide', savePosition);
+  listen(window, 'pagehide', savePosition);
   // Persist scroll into the current history entry without waiting for another click.
   let frame;
-  document.addEventListener('scroll', () => {
+  listen(document, 'scroll', () => {
     if (!frame) frame = requestAnimationFrame(() => {frame = null; savePosition();});
   }, true);
+  window.oaInboxCleanup = () => {
+    active = false;
+    sequence++;
+    controller?.abort();
+    workspaceObserver?.disconnect();
+    clearTimeout(searchTimer);
+    if (frame) cancelAnimationFrame(frame);
+    for (const remove of listeners) remove();
+  };
   if (history.state?.oaList !== undefined) restore(history.state);
   else savePosition();
   enhance();

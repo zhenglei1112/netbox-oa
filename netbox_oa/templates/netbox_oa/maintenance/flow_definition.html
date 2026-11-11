@@ -1,5 +1,5 @@
 {% extends 'base/layout.html' %}
-{% load static %}
+{% load static oa_filters %}
 {% block title %}{{ flow_name }}{% endblock %}
 {% block content %}
 {% include 'netbox_oa/inc/notifications.html' %}
@@ -18,8 +18,8 @@
       </select>
     </div><button class="btn btn-ghost-primary" type="submit">查看</button>
   </form>
-  {% if policy %}<p class="mt-3 mb-0">当前配置：<strong>{{ policy.name }}</strong> · {% if policy.enabled %}启用{% else %}停用{% endif %} · 每节点时限 {{ sla_hours }} 小时 · 提前 {{ policy.warning_hours }} 小时预警</p>
-  {% else %}<p class="text-muted mt-3 mb-0">默认节点时限：{{ sla_hours }} 小时</p>{% endif %}
+  {% if policy %}<p class="mt-3 mb-0">当前配置：<strong>{{ policy.name }}</strong> · {% if policy.enabled %}启用{% else %}停用{% endif %} · 每节点时限 {{ sla_hours|duration_hours }} · 提前 {{ policy.warning_hours|duration_hours }}预警</p>
+  {% else %}<p class="text-muted mt-3 mb-0">默认节点时限：{{ sla_hours|duration_hours }}</p>{% endif %}
 </div></div>
 <details class="card mb-3"><summary class="card-header">查看处理角色与用户组</summary><div class="card-body">
   <div class="row">
@@ -31,7 +31,7 @@
 <details class="card mb-3"><summary class="card-header">查看审批与材料规则</summary><div class="card-body">
   <ul class="mb-0">
     <li>发起人不能审批自己发起的工单，包括加签和管理员代办；须由其他有权限的审批人办理。用户组成员还须具有相应的工单查看和任务办理权限。</li>
-    <li>工单复核、工单部门审核、验收申请、验收复核、验收部门审核须完成本人手写签名后批转；工单公司审批和验收公司审批无需签名。验收复核使用初审人用户组。</li>
+    <li>工单复核、工单部门审核、验收申请、验收复核、验收部门审核须完成本人手写签名后批转；工单公司审批和验收公司审批无需签名。验收复核使用复核人用户组。</li>
     <li>维护服务工单和工单验收单各一份，修订保存新版本；服务报告和服务结算单允许多份，上传时明确新增或更新，更新保留份号和历史版本。</li>
     <li>覆盖保留历史版本；删除须有材料删除权限，删除后旧版本不计入当前材料。</li>
     <li>只有维护服务工单和工单验收单办理用印，用印件须关联本次审批的具体表单版本；审批原件、用印件和历史版本均可按权限查阅。</li>
@@ -85,7 +85,7 @@
       <td><strong>{{ node.position }}. {{ node.name }}{% if node.return_only %}（仅退回时进入）{% endif %}</strong></td>
       <td>{{ node.kind_label }}</td>
       <td>{{ node.role_label }}{% if node.group %}<div class="text-muted">{{ node.group.name }}</div>{% elif node.role != 'owner' and node.role != 'requester' and policy %}<div class="text-warning">未配置</div>{% endif %}</td>
-      <td>{% for material in node.materials %}<div>{{ material }}</div>{% endfor %}{% for rule in node.rules %}<div class="text-muted">{{ rule }}</div>{% endfor %}{% if not node.materials and not node.rules %}办理确认{% endif %}<div class="text-muted">时限：{{ node.sla_hours }} 小时</div></td>
+      <td>{% for material in node.materials %}<div>{{ material }}</div>{% endfor %}{% for rule in node.rules %}<div class="text-muted">{{ rule }}</div>{% endfor %}{% if not node.materials and not node.rules %}办理确认{% endif %}<div class="text-muted">时限：{{ node.sla_hours|duration_hours }}</div></td>
       <td>{% if node.return_label %}{{ node.return_label }}{% else %}不支持退回{% endif %}</td>
       <td>{{ node.completion_label }}{% if node.payment_label %}<div class="text-muted">付款状态：{{ node.payment_label }}</div>{% endif %}{% if node.kind == 'approval' %}<div class="text-muted">支持加签；加签完成后继续</div>{% endif %}</td>
     </tr>{% endfor %}</tbody>

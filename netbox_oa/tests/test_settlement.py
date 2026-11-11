@@ -3,6 +3,7 @@ from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
@@ -52,6 +53,8 @@ class SettlementTests(TestCase):
 
     def test_generation_and_approval_only_link_to_contract_details(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         self.client.force_login(self.actor)
         expected = reverse("plugins:netbox_contract:contract", args=[self.contract.pk])
         for name in ("生成付款", "付款部门审核"):
@@ -70,6 +73,8 @@ class SettlementTests(TestCase):
 
     def test_external_payment_validation_does_not_block_oa_submission(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         self.new_payment(period_start=date(2026, 9, 30), period_end=date(2026, 9, 1))
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
@@ -77,6 +82,8 @@ class SettlementTests(TestCase):
 
     def test_payment_submission_and_approval_api_need_no_payment_fields(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         api = APIClient()
         api.force_authenticate(self.actor)
         for name in ("生成付款", "付款部门审核"):
@@ -90,6 +97,8 @@ class SettlementTests(TestCase):
 
     def test_invoice_permissions_are_not_required_to_generate_and_approve(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         actor = self.worker("contract_payment_handler")
         self.grant(actor, "maintenancetask", "view")
         actor.user_permissions.add(
@@ -111,6 +120,8 @@ class SettlementTests(TestCase):
 
     def test_contract_information_link_respects_view_permission(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         reader = self.worker("hidden_payment_contract")
         self.grant(reader, "maintenancetask", "view")
         services.transfer_task(
@@ -169,3 +180,33 @@ class SettlementTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_payment_approval_can_read_attachments_but_cannot_change_them(self):
+        self.reach("payment_plan")
+        documents = [self.upload(material) for material in ("notice", "invoice")]
+        self.client.force_login(acting_user(self))
+        page = self.client.get(self.order.get_absolute_url())
+        for material in ("notice", "invoice"):
+            self.assertContains(page, f"panel=material-{material}&amp;pane=upload")
+        services.complete_task(pk=self.current().pk, actor=acting_user(self))
+        self.assertEqual(self.current().name, "付款部门审核")
+        self.client.force_login(acting_user(self))
+        page = self.client.get(self.order.get_absolute_url())
+        for document in documents:
+            material = document.material
+            item = next(item for item in page.context["detail"]["materials"]
+                        if item["key"] == material)
+            self.assertEqual(item["current_file"], document)
+            self.assertFalse(item["can_upload_now"])
+            review = self.client.get(reverse("plugins:netbox_oa:maintenance_review",
+                                             args=[self.order.pk]), {"material": material})
+            self.assertContains(review, document.original_name)
+            self.assertIn(document, review.context["selected_group"]["documents"])
+            for state in ("electronic", "scan"):
+                with self.assertRaisesMessage(ValidationError, "只能在生成付款环节上传"):
+                    self.upload(material, state)
+            with self.assertRaises(ValidationError):
+                services.remove_document(pk=document.pk, actor=acting_user(self))
+        services.complete_task(pk=self.current().pk, actor=acting_user(self))
+        self.assertEqual(self.current().name, "付款")
+        self.assertFalse(dict(self.order_now().steps_snapshot[self.current().position]["required"]))

@@ -29,7 +29,7 @@
   <nav class="oa-panel-tabs" aria-label="{{ material.name }}资料视图">
     <a data-oa-tab="files" class="{% if panel_pane != 'versions' and panel_pane != 'upload' %}active{% endif %}" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=files">当前文件</a>
     <a data-oa-tab="versions" class="{% if panel_pane == 'versions' %}active{% endif %}" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=versions">版本记录 <span>{{ material.versions|length }}</span></a>
-    {% if detail.order.status == 'draft' or detail.order.status == 'active' %}{% if material.can_fill or perms.netbox_oa.add_maintenancedocument %}<a data-oa-tab="upload" class="{% if panel_pane == 'upload' %}active{% endif %}" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=upload">上传 / 修订</a>{% endif %}{% endif %}
+    {% if material.key != 'notice' and material.key != 'invoice' or material.can_upload_now %}{% if detail.order.status == 'draft' or detail.order.status == 'active' %}{% if material.can_fill or perms.netbox_oa.add_maintenancedocument %}<a data-oa-tab="upload" class="{% if panel_pane == 'upload' %}active{% endif %}" href="{{ detail_url }}&amp;panel=material-{{ material.key }}&amp;pane=upload">上传 / 修订</a>{% endif %}{% endif %}{% endif %}
   </nav>
   <div class="oa-panel-body">
     <section data-oa-tab-panel="files" {% if panel_pane == 'versions' or panel_pane == 'upload' %}hidden{% endif %} aria-label="当前文件">

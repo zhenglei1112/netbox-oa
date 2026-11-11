@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from netbox_oa.maintenance_views import GUIDE_COLLAPSED_CONFIG
 from netbox_oa.tests import test_draft_submission, test_maintenance
 from netbox_oa.tests.test_maintenance import acting_user
 
@@ -28,6 +29,54 @@ class WorkbenchV2Tests(TestCase):
             reverse("plugins:netbox_oa:maintenance_workbench_v2"),
             {"tab": "all", "selected": self.order.pk, **params},
         )
+
+    def test_guide_mode_is_saved_for_current_user_and_restored_in_html(self):
+        # The standalone user lacks NetBox's config; mirror its public API.
+        from unittest.mock import Mock
+
+        configs = {}
+
+        def config(user):
+            if user.pk not in configs:
+                values = {}
+                configs[user.pk] = Mock(
+                    get=lambda key, default=None: values.get(key, default),
+                    set=Mock(side_effect=lambda key, value, commit=False:
+                             values.update({key: value})),
+                )
+            return configs[user.pk]
+
+        url = reverse("plugins:netbox_oa:maintenance_guide_preference")
+        with patch.object(get_user_model(), "config", property(config), create=True):
+            self.assertContains(
+                self.page(), 'aria-expanded="true" aria-controls="oa-guide-content"'
+            )
+            current_user = acting_user(self)
+            response = self.client.post(url, {"collapsed": "true", "user": self.approver.pk})
+            self.assertEqual(response.json(), {"collapsed": True})
+            configs[current_user.pk].set.assert_called_once_with(
+                GUIDE_COLLAPSED_CONFIG, True, commit=True
+            )
+            self.assertContains(self.page(), '<div id="oa-guide-content" hidden>')
+            self.assertContains(self.page(), 'aria-expanded="false"')
+            self.client.force_login(self.approver)
+            response = self.client.get(
+                reverse("plugins:netbox_oa:maintenance_workbench_v2"),
+                {"tab": "all", "selected": self.order.pk},
+            )
+            self.assertFalse(response.context["guide_collapsed"])
+            self.page()
+            self.assertEqual(self.client.post(url, {"collapsed": "false"}).status_code, 200)
+            self.assertNotContains(self.page(), '<div id="oa-guide-content" hidden>')
+            self.assertEqual(self.client.post(url, {"collapsed": "invalid"}).status_code, 400)
+            self.assertEqual(self.client.get(url).status_code, 405)
+            from django.test import Client
+
+            csrf_client = Client(enforce_csrf_checks=True)
+            csrf_client.force_login(current_user)
+            self.assertEqual(csrf_client.post(url, {"collapsed": "true"}).status_code, 403)
+            self.client.logout()
+            self.assertEqual(self.client.post(url, {"collapsed": "true"}).status_code, 302)
 
     def test_all_entrypoints_use_v2_without_version_switches(self):
         self.page()

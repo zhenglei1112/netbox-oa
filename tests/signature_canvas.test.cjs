@@ -45,7 +45,7 @@ test('mobile canvas captures strokes, clears ink and submits a PNG only after dr
   assert.equal(parseFloat(canvas.style.width),800);
   assert.equal(canvas.width,1280);
   assert.equal(canvas.height,480);
-  assert.equal(context.lineWidth,5);
+  assert.equal(context.lineWidth,8);
   rect = {left:10,top:20,width:800,height:300,right:810};
   handlers.pointerdown({pointerId:2, clientX:170,clientY:170, preventDefault(){}});
   assert.deepEqual(strokes.at(-2), [256,240]);

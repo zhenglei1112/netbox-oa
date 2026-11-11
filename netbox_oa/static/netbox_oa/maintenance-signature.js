@@ -20,7 +20,7 @@
         }
         canvas.style.width = `${rect.width}px`;
         canvas.style.height = `${rect.height}px`;
-        ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       };
       fitCanvas();
       // Preserve the ink and its proportions while filling the available surface.
@@ -32,7 +32,7 @@
       return [(event.clientX - rect.left) * canvas.width / rect.width,
         (event.clientY - rect.top) * canvas.height / rect.height];
     };
-    ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     canvas.addEventListener('pointerdown', event => {
       if (pointer !== null) return;
       event.preventDefault(); pointer = event.pointerId; canvas.setPointerCapture(pointer);

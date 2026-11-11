@@ -11,6 +11,7 @@ from users.models import Group
 
 from .maintenance_flow import ROLES
 from .models import MaintenanceEvent, MaintenanceOrder, MaintenanceTask
+from .time_display import format_duration
 
 
 def person_name(person, viewer=None):
@@ -252,9 +253,7 @@ class InboxPresentation:
             "future_nodes": [node for node in nodes if node["index"] > order.current_position]
             if order.status == "active"
             else [],
-            "waiting": f"{waited // 60} 小时 {waited % 60} 分钟"
-            if waited >= 60
-            else f"{waited} 分钟",
+            "waiting": format_duration(waited),
             "deadline_state": deadline_state,
             "required_materials": {"order"}
             if order.status == "draft"
@@ -312,6 +311,7 @@ class InboxPresentation:
             item = {
                 "event": event,
                 "actor_name": person_name(event.actor, self.user),
+                "actor_full_name": person_name(event.actor),
                 "action_label": event_label(event),
                 "description": event.description,
                 "short_label": label,

@@ -178,10 +178,9 @@ class MaintenanceTests(TestCase):
                             source_document_id=source.pk,
                             file=SimpleUploadedFile("stamped.pdf", b"scan"),
                         )
-        else:
-            for material, state in node["required"]:
-                if not order.documents.filter(material=material).exists():
-                    self.upload(material, state)
+        for material, state in node["required"]:
+            if material != scan_material and not order.documents.filter(material=material).exists():
+                self.upload(material, state)
         if node["key"] in TASK_SIGNING_NODES and not task.signatures.filter(
             signer=actor, cancelled=False
         ).exists():
@@ -205,7 +204,7 @@ class MaintenanceTests(TestCase):
             self.upload("settlement", "scan")
 
     def test_material_validation_lists_all_missing_payment_documents_together(self):
-        self.reach("payment_eip")
+        self.reach("payment_plan")
         with self.assertRaises(ValidationError) as caught:
             services.complete_task(
                 pk=self.current().pk, actor=acting_user(self), external_reference="EIP-001"
@@ -267,6 +266,9 @@ class MaintenanceTests(TestCase):
             )
         ]
         self.assertEqual([node["key"] for node in nodes], [node["key"] for node in expected])
+        self.assertContains(response, "每节点时限 1天12小时0分钟")
+        self.assertContains(response, "提前 4小时0分钟预警")
+        self.assertContains(response, "时限：1天12小时0分钟", count=len(nodes))
         self.assertEqual(response.context["node_count"], 14)
         self.assertEqual(response.context["correction_count"], 1)
         self.assertContains(response, "5 个顺序环节")
@@ -346,7 +348,7 @@ class MaintenanceTests(TestCase):
         self.assertIn("本次验收单版本", nodes["acceptance_department"]["rules"][1])
         self.assertIn("审批原件", nodes["acceptance_sealed_upload"]["rules"][1])
         self.assertContains(response, "发起人不能审批自己发起的工单")
-        self.assertContains(response, "验收复核使用初审人用户组")
+        self.assertContains(response, "验收复核使用复核人用户组")
         for key in ("report_fill", "settlement_fill", "order_department_seal"):
             self.assertNotIn(key, nodes)
 
@@ -411,15 +413,12 @@ class MaintenanceTests(TestCase):
             [step["name"] for step in order.steps_snapshot if step["stage"] == "payment"],
             ["生成付款", "付款部门审核", "付款"],
         )
-        with self.assertRaisesMessage(ValidationError, "付款通知书"):
-            services.complete_task(pk=self.current().pk, actor=acting_user(self))
-        for material in ("notice", "invoice"):
-            self.upload(material)
         self.client.force_login(self.actor)
         page = self.client.get(self.order.get_absolute_url())
-        self.assertContains(page, 'aria-label="上传"')
         for material in ("notice", "invoice"):
-            self.assertContains(page, f"panel=material-{material}&amp;pane=upload")
+            self.assertNotContains(page, f"panel=material-{material}&amp;pane=upload")
+            with self.assertRaisesMessage(ValidationError, "只能在生成付款环节上传"):
+                self.upload(material)
         with self.assertRaisesMessage(ValidationError, "外部流程节点必须登记"):
             services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.complete()
@@ -429,6 +428,8 @@ class MaintenanceTests(TestCase):
 
     def test_payment_plan_can_submit_without_payment_selection(self):
         self.reach("payment_plan")
+        self.upload("notice")
+        self.upload("invoice")
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.assertEqual(self.current().name, "付款部门审核")
 
@@ -470,7 +471,10 @@ class MaintenanceTests(TestCase):
                 self.assertFalse(services.task_is_assigned(task, owner))
                 with self.assertRaises(PermissionDenied):
                     services.complete_task(pk=task.pk, actor=owner)
-                if node["key"] != "payment_plan":
+                if node["key"] == "payment_plan":
+                    self.upload("notice")
+                    self.upload("invoice")
+                else:
                     self.upload("acceptance")
                     self.upload("report", "scan")
                     self.upload("settlement", "scan")
