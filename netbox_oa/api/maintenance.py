@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from netbox_oa import maintenance_services as services
 from netbox_oa.maintenance_contracts import order_object_links
 from netbox_oa.maintenance_flow import MATERIALS, ROLES
+from netbox_oa.maintenance_materials import SERVICE_ITEMS
 from netbox_oa.models import (
     MaintenanceDocument,
     MaintenanceOrder,
@@ -47,7 +48,17 @@ class PolicyWriteSerializer(serializers.Serializer):
     groups = serializers.DictField(child=serializers.IntegerField(min_value=1))
 
 
+class ServiceItemsSerializerField(serializers.ListField):
+    def to_internal_value(self, data):
+        if isinstance(data, str):
+            data = [data]
+        return super().to_internal_value(data)
+
+
 class OrderSerializer(ValidatedModelSerializer):
+    service_type = ServiceItemsSerializerField(
+        child=serializers.ChoiceField(choices=SERVICE_ITEMS), allow_empty=False,
+    )
     current_contract_type = serializers.SerializerMethodField()
 
     def get_current_contract_type(self, obj):

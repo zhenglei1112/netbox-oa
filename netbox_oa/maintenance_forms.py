@@ -13,7 +13,12 @@ from .maintenance_contracts import (
     service_regions,
 )
 from .maintenance_flow import FLOW_NAME, MATERIALS, ROLES
-from .maintenance_materials import SERVICE_EFFECTS, SERVICE_ITEMS, company_form_initial
+from .maintenance_materials import (
+    SERVICE_EFFECTS,
+    SERVICE_ITEMS,
+    company_form_initial,
+    service_type_values,
+)
 from .maintenance_numbering import issue_number, number_from_token
 from .models import MaintenanceDocument, MaintenanceOrder, MaintenancePolicy
 
@@ -105,7 +110,18 @@ class ContractFieldsMixin:
         return data
 
 
+class ServiceItemsField(forms.MultipleChoiceField):
+    def __init__(self, **kwargs):
+        super().__init__(label="服务项目", choices=SERVICE_ITEMS, **kwargs)
+
+    def to_python(self, value):
+        if isinstance(value, str):
+            value = service_type_values(value)
+        return super().to_python(value)
+
+
 class MaintenanceOrderForm(ContractFieldsMixin, StyledForm, ChangelogMessageMixin, forms.ModelForm):
+    service_type = ServiceItemsField()
     number = forms.CharField(label="工单编号", disabled=True, required=False)
     number_token = forms.CharField(widget=forms.HiddenInput)
 
@@ -125,6 +141,7 @@ class MaintenanceOrderForm(ContractFieldsMixin, StyledForm, ChangelogMessageMixi
 
     def __init__(self, *args, actor, **kwargs):
         super().__init__(*args, **kwargs)
+        self.initial["service_type"] = service_type_values(self.initial.get("service_type"))
         self.fields["policy"].queryset = MaintenancePolicy.objects.restrict(actor, "view").filter(
             enabled=True
         )
@@ -335,7 +352,7 @@ class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):
     supplier = forms.CharField(label="服务单位", max_length=200)
     service_region = forms.CharField(label="服务省市", max_length=200)
     service_location = forms.CharField(label="服务位置", max_length=200)
-    service_type = forms.ChoiceField(label="服务项目（单选）", choices=SERVICE_ITEMS)
+    service_type = ServiceItemsField()
     requirements = forms.CharField(
         label="服务要求", max_length=10000, widget=forms.Textarea(attrs={"rows": 6})
     )
@@ -344,6 +361,7 @@ class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):
 
     def __init__(self, *args, material, actor, order=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.initial["service_type"] = service_type_values(self.initial.get("service_type"))
         if material == "acceptance":
             self.fields.pop("signature")
             self.fields.pop("signature_date")
@@ -352,10 +370,10 @@ class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):
                     self.fields[name].disabled = True
                     self.initial[name] = value
             self.fields["service_effect"] = forms.ChoiceField(
-                label="服务效果", choices=(("", "请选择"), *SERVICE_EFFECTS),
-                error_messages={"required": "请选择服务效果。",
-                                "invalid_choice": "请选择有效的服务效果。"},
-                widget=forms.Select(attrs={"data-required-message": "请选择服务效果。"}),
+                label="验收结果", choices=(("", "请选择"), *SERVICE_EFFECTS),
+                error_messages={"required": "请选择验收结果。",
+                                "invalid_choice": "请选择有效的验收结果。"},
+                widget=forms.Select(attrs={"data-required-message": "请选择验收结果。"}),
             )
             self.fields["settlement_amount"] = forms.DecimalField(
                 label="结算金额（元）", max_digits=14, decimal_places=2, min_value=0,

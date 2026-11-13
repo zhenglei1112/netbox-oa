@@ -95,11 +95,11 @@ class MaintenanceAuditTests(TestCase):
             # Automatic initial form generation is part of creation, not another save.
             self.assertIsNone(self.order.events.get(action="form").to_objectchange("create"))
 
-    def test_only_seven_operation_categories_are_emitted_with_concise_payloads(self):
+    def test_only_six_operation_categories_are_emitted_with_concise_payloads(self):
         labels = set()
         with patch.object(ChangeLoggedModel, "to_objectchange", native_change, create=True):
             for action in (*MaintenanceEvent.AUDIT_OPERATIONS, "signature", "follow", "unfollow",
-                           "link", "preview", "download", "terminate", "withdraw"):
+                           "link", "preview", "download", "terminate", "withdraw", "view"):
                 event = services._event(
                     self.order, self.actor, action, "详细业务动作",
                     comment="办理意见" * 500, material="report", version=12, document_id=7,
@@ -115,7 +115,7 @@ class MaintenanceAuditTests(TestCase):
                     self.assertIsNone(event.to_objectchange("update"))
                 else:
                     self.assertIsNone(change)
-        self.assertEqual(labels, {"创建流程", "批转流程", "打开流程（查阅流程）", "保存表单",
+        self.assertEqual(labels, {"创建流程", "批转流程", "保存表单",
                                   "打印表单", "上传材料", "删除材料"})
 
     def test_create_and_form_save_each_emit_one_native_record(self):
@@ -142,6 +142,22 @@ class MaintenanceAuditTests(TestCase):
         self.assertEqual(event.actor, self.actor)
         self.assertEqual(event.details["fields"], [])
         self.assertEqual(list(self.order.documents.values_list("pk", flat=True)), version_ids)
+
+    def test_internal_save_keeps_business_history_without_native_save_records(self):
+        with self.native_changes() as changes:
+            services.update_order(
+                pk=self.order.pk, actor=self.actor, requirements="签名前保存内容", audit=False,
+            )
+            services.update_order(
+                pk=self.order.pk, actor=self.actor, requirements="签名前保存内容", audit=False,
+            )
+        self.assertEqual(changes, [])
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.requirements, "签名前保存内容")
+        self.assertEqual(set(self.order.events.filter(action__in=("edit", "save"))
+                             .values_list("action", flat=True)), {"edit", "save"})
+        self.assertFalse(self.order.events.filter(action__in=("edit", "save"),
+                                                 details__audit=True).exists())
 
     def test_failed_mutation_rolls_back_changes_and_its_operation_records(self):
         before = self.order.events.count(), self.order.documents.count()
@@ -261,29 +277,28 @@ class MaintenanceAuditTests(TestCase):
         self.assertEqual(self.order.events.count(), before)
         self.assertEqual(changes, [])
 
-    def test_only_explicit_flow_open_is_logged_not_list_filter_or_history_refresh(self):
+    def test_opening_refreshing_and_browsing_flow_do_not_add_audit_records(self):
         base = reverse("plugins:netbox_oa:maintenance_workbench")
-        self.assertEqual(self.client.get(base).status_code, 200)
-        self.assertFalse(self.order.events.filter(action="view").exists())
+        before = self.order.events.count()
         with self.native_changes() as changes:
-            self.assertEqual(self.client.get(self.order.get_absolute_url()).status_code, 200)
-        self.assertEqual([change.message for change in changes], ["打开流程（查阅流程）"])
-        for params, headers in (
-            ({"selected": self.order.pk, "history": "100"}, {}),
-            ({"selected": self.order.pk}, {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
-                                          "HTTP_X_OA_NAVIGATION": "search"}),
-            ({"selected": self.order.pk}, {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
-                                          "HTTP_X_OA_NAVIGATION": "all"}),
-        ):
-            self.assertEqual(self.client.get(base, params, **headers).status_code, 200)
-        self.assertEqual(self.order.events.filter(action="view").count(), 1)
-        self.client.get(base, {"selected": self.order.pk},
-                        HTTP_X_REQUESTED_WITH="XMLHttpRequest", HTTP_X_OA_NAVIGATION="detail")
-        self.assertEqual(self.order.events.filter(action="view").count(), 2)
+            for url, params, headers in (
+                (base, {}, {}),
+                (self.order.get_absolute_url(), {}, {}),
+                (self.order.get_absolute_url(), {}, {}),
+                (base, {"selected": self.order.pk}, {}),
+                (base, {"selected": self.order.pk, "restore": "1"}, {}),
+                (base, {"selected": self.order.pk, "history": "100"}, {}),
+                *((base, {"selected": self.order.pk}, {
+                    "HTTP_X_REQUESTED_WITH": "XMLHttpRequest", "HTTP_X_OA_NAVIGATION": mode,
+                }) for mode in ("search", "all", "detail")),
+            ):
+                with self.subTest(url=url, params=params, headers=headers):
+                    self.assertEqual(self.client.get(url, params, **headers).status_code, 200)
+        self.assertEqual(self.order.events.count(), before)
+        self.assertEqual(changes, [])
 
-    def test_opening_or_printing_does_not_replace_workflow_progress(self):
+    def test_printing_does_not_replace_workflow_progress(self):
         before = presentation(self.order, self.actor, with_details=False)
-        services.record_order_view(pk=self.order.pk, actor=self.actor)
         services.record_form_print(pk=self.order.documents.get().pk, actor=self.actor)
         after = presentation(self.order, self.actor, with_details=False)
         self.assertEqual(before["latest_activity"], after["latest_activity"])

@@ -4,7 +4,7 @@ const {runInNewContext} = require('node:vm');
 const {test} = require('node:test');
 const source = readFileSync('netbox_oa/static/netbox_oa/maintenance-print.js', 'utf8');
 
-function setup(decode, count = 2, responses = [true], embedded = false) {
+function setup(decode, count = 2, responses = [true], embedded = false, seals = []) {
   const active = new Set(), handlers = {};
   const requests = [];
   const button = {dataset: {auditUrl: '/materials/7/print-event/', csrfToken: 'csrf-token'},
@@ -24,7 +24,7 @@ function setup(decode, count = 2, responses = [true], embedded = false) {
     document: {
       getElementById: () => embedded ? null : button,
       body: {dataset: button.dataset, append(node) {handlers.feedback = node;}},
-      querySelectorAll: () => templates,
+      querySelectorAll: selector => selector === '.print-code-template' ? templates : seals,
       createElement: () => ({setAttribute() {}, remove() {}}),
     },
     window: {
@@ -60,6 +60,18 @@ test('codes are added only on click, decoded before print and removed after prin
   assert.equal(app.requests.length, 2);
   app.handlers.afterprint();
   assert.equal(app.active.size, 0);
+});
+
+test('print waits for the approved electronic seal to decode', async () => {
+  let resolve;
+  const loading = new Promise(done => {resolve = done;});
+  const app = setup(() => Promise.resolve(), 2, [true], false, [{decode: () => loading}]);
+  const pending = app.handlers.click();
+  await Promise.resolve();
+  assert.equal(app.prints(), 0);
+  resolve();
+  await pending;
+  assert.equal(app.prints(), 1);
 });
 
 test('failed image decoding retains a usable retry button and does not print', async () => {

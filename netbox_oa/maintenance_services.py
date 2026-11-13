@@ -138,7 +138,7 @@ def save_policy(
         _require_actor(actor, MaintenancePolicy, "add")
         policy = MaintenancePolicy()
     if set(groups) != {role for role, _ in ROLES}:
-        raise ValidationError("请配置全部四种经办角色。")
+        raise ValidationError("请配置全部三种审批角色。")
     ids = set(groups.values())
     if len(list(Group.objects.select_for_update().filter(pk__in=ids))) != len(ids):
         raise ValidationError("经办组不存在。")
@@ -218,7 +218,7 @@ def create_order(*, actor, policy, number_token=None, changelog_message="", **da
 
 
 @transaction.atomic
-def update_order(*, pk, actor, expected_document_id=None, changelog_message="", **data):
+def update_order(*, pk, actor, expected_document_id=None, changelog_message="", audit=True, **data):
     order = _order(pk, actor)
     if expected_document_id is not None:
         latest = order.documents.filter(material="order", kind="form").first()
@@ -291,7 +291,7 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
         if changelog_message:
             _save(order)
         _event(order, actor, "save", "保存工单资料（内容未变）",
-               fields=[], changelog_message=changelog_message)
+               fields=[], changelog_message=changelog_message, audit=audit)
         return order
     for key, value in data.items():
         setattr(order, key, value)
@@ -304,7 +304,7 @@ def update_order(*, pk, actor, expected_document_id=None, changelog_message="", 
         form_data.update({key: getattr(order, key) for key in ORDER_FORM_FIELDS})
         _create_company_document(order, actor, "order", form_data, audit=False)
     _event(order, actor, "edit", "修改并保存工单资料", fields=sorted(data),
-           changelog_message=changelog_message, contract_before=previous_contract,
+           changelog_message=changelog_message, audit=audit, contract_before=previous_contract,
            contract_after={"id": order.contract_id, "number": order.contract_number,
                            "type": order.contract_type_snapshot})
     return order
@@ -496,6 +496,12 @@ def remove_document(*, pk, actor):
 
 
 def _materials(order, node):
+    if material := node.get("require_electronic_seal"):
+        approved = order.documents.filter(
+            material=material, kind="form", removed_at__isnull=True,
+        ).order_by("-version").first()
+        if not approved or not approved.electronic_seal:
+            raise ValidationError("请先完成公司审批，生成电子盖章文件。")
     if node.get("scan_materials"):
         ids = {}
         for material in node["scan_materials"]:
@@ -579,13 +585,6 @@ def _materials(order, node):
 def _comment(comment, required=False):
     if len(comment) > 4000 or (required and not comment.strip()):
         raise ValidationError("请填写处理意见，最多 4000 字符。")
-
-
-@transaction.atomic
-def record_order_view(*, pk, actor):
-    _allowed(MaintenanceOrder, actor, "view", pk)
-    order = MaintenanceOrder.objects.get(pk=pk)
-    return _event(order, actor, "view", "打开流程（查阅流程）")
 
 
 @transaction.atomic
@@ -681,6 +680,9 @@ def complete_task(*, pk, actor, comment="", external_reference=""):
         if handwritten:
             task.evidence["signature"]["image_id"] = handwritten.pk
     _save(task)
+    from .maintenance_seals import stamp_approved_form
+
+    stamp_approved_form(order, task, actor)
     if node["payment"]:
         order.payment_status = node["payment"]
     _event(
@@ -902,6 +904,7 @@ def check_company_form_access(order, actor, material):
 
 
 def _create_company_document(order, actor, material, data, *, audit=True, event_details=None):
+    data = {key: value for key, value in data.items() if key != "electronic_seal"}
     if material == "order":
         data = {
             **data,
@@ -993,6 +996,10 @@ def upload_document(
 ):
     if material not in dict(MATERIALS):
         raise ValidationError("不支持上传此类材料。")
+    if material in COMPANY_FORMS:
+        raise ValidationError(
+            "工单和验收单仅保留系统电子件，公司审批通过后自动盖章，无需上传扫描件。"
+        )
     if state not in {"electronic", "scan"}:
         raise ValidationError("材料状态仅支持 electronic（电子版）和 scan（扫描版）。")
     # Uploading may be performed by the owner or the actor of the current task.

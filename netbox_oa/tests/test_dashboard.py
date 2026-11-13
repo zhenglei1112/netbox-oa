@@ -159,15 +159,15 @@ class MaintenanceTodoListWidgetTests(TestCase):
 
         self.start()
         for key, comment in (
-            ("order_senior_seal", "同意"), ("order_seal", "已用印"),
-            ("acceptance_seal", "已用印"),
+            ("order_senior_seal", "同意"),
         ):
             with self.subTest(key=key):
                 task = self.set_node(key)
                 html = self.render_widget(acting_user(self, task))
                 self.assertNotIn("disabled title=", html)
                 with patch(
-                    "netbox_oa.maintenance_services._materials", return_value={},
+                    "netbox_oa.maintenance_services._materials",
+                    return_value={"order": self.order.documents.get(material="order").pk},
                 ) as materials:
                     response = self.post_task(task)
                 self.assertEqual(response.status_code, 200)
@@ -186,7 +186,7 @@ class MaintenanceTodoListWidgetTests(TestCase):
         self.start()
         for key in (
             "order_correction", "order_review", "order_final",
-            "order_sealed_upload", "acceptance_apply", "payment_plan", "payment_eip",
+            "acceptance_apply", "payment_plan", "payment_eip",
         ):
             with self.subTest(key=key):
                 task = self.set_node(key)
@@ -196,11 +196,11 @@ class MaintenanceTodoListWidgetTests(TestCase):
 
     def test_missing_materials_still_block_quick_complete(self):
         self.start()
-        for key in ("order_seal", "acceptance_seal"):
+        for key in ("acceptance_company",):
             with self.subTest(key=key):
                 task = self.set_node(key)
-                html = self.render_widget(self.actor)
-                self.assertIn("已用印", html)
+                html = self.render_widget(self.approver)
+                self.assertIn("同意", html)
                 self.assertNotIn("disabled title=", html)
                 response = self.post_task(task)
                 self.assertEqual(response.status_code, 400)
@@ -211,7 +211,7 @@ class MaintenanceTodoListWidgetTests(TestCase):
         from django.contrib.auth import get_user_model
 
         self.start()
-        task = self.set_node("order_seal")
+        task = self.set_node("order_senior_seal")
         other = get_user_model().objects.create_user(username="todo_outsider")
         self.grant(other, "maintenanceorder", "view")
         self.grant(other, "maintenancetask", "change")
@@ -229,7 +229,7 @@ class MaintenanceTodoListWidgetTests(TestCase):
         from django.test import Client
 
         self.start()
-        task = self.set_node("order_seal")
+        task = self.set_node("order_senior_seal")
         url = reverse("plugins:netbox_oa:maintenancetask_quick_complete", args=[task.pk])
         self.client.force_login(self.actor)
         self.assertEqual(self.client.get(url).status_code, 405)

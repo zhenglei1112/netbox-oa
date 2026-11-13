@@ -10,7 +10,7 @@ from django.utils import timezone
 from netbox_oa import maintenance_services as services
 from netbox_oa import maintenance_signatures as signatures
 from netbox_oa.maintenance_flow import STAGES, build_steps
-from netbox_oa.maintenance_materials import company_form_initial
+from netbox_oa.maintenance_materials import company_form_initial, service_effect_label
 from netbox_oa.tests import test_maintenance
 from netbox_oa.tests.test_maintenance import acting_user
 from netbox_oa.tests.test_signatures import image_data
@@ -34,7 +34,7 @@ class AcceptanceTests(TestCase):
     def form(self, **values):
         return services.save_company_form(
             pk=self.order.pk, actor=self.actor, material="acceptance",
-            data={**company_form_initial(self.order), "service_effect": "good",
+            data={**company_form_initial(self.order), "service_effect": "passed",
                   "settlement_amount": "1234.56", **values},
         )
 
@@ -55,9 +55,9 @@ class AcceptanceTests(TestCase):
         self.assertEqual([key for key, _ in STAGES], ["ordering", "acceptance", "payment"])
         nodes = [node for node in build_steps({}, 24) if node["stage"] == "acceptance"]
         self.assertEqual([node["name"] for node in nodes], ["验收申请", "验收复核", "验收部门审核",
-                         "验收公司审批", "验收用印", "上传用印后验收单"])
+                         "验收公司审批"])
         self.assertEqual([node["role"] for node in nodes], ["requester", "reviewer", "department",
-                         "senior", "seal", "requester"])
+                         "senior"])
         self.assertEqual([node["return_to"] for node in nodes[1:4]], ["acceptance_apply"] * 3)
 
     def test_application_requires_form_and_both_scan_types(self):
@@ -81,11 +81,40 @@ class AcceptanceTests(TestCase):
                        {"settlement_amount": "NaN"}, {"settlement_amount": "10.001"}):
             with self.subTest(values=values), self.assertRaises(ValidationError):
                 self.form(**values)
-        document = self.form(supplier="伪造单位", service_effect="excellent",
+        document = self.form(supplier="伪造单位", service_effect="passed",
                              settlement_amount="0.10")
         self.assertEqual(document.form_data["supplier"], self.order.supplier)
         self.assertEqual(document.form_data["settlement_amount"], "0.10")
-        self.assertEqual(document.form_data["service_effect"], "excellent")
+        self.assertEqual(document.form_data["service_effect"], "passed")
+
+    def test_acceptance_result_choices_and_history(self):
+        self.application()
+        self.client.force_login(self.actor)
+        url = reverse("plugins:netbox_oa:maintenance_company_form",
+                      args=[self.order.pk, "acceptance"])
+        page = self.client.get(url)
+        field = page.context["form"].fields["service_effect"]
+        self.assertEqual(field.label, "验收结果")
+        self.assertEqual(list(field.choices), [("", "请选择"), ("passed", "通过"),
+                                              ("failed", "不通过")])
+        for value, label in (("passed", "通过"), ("failed", "不通过")):
+            document = self.form(service_effect=value)
+            self.assertEqual(document.form_data["service_effect"], value)
+            for route in ("maintenance_print", "maintenance_verify"):
+                response = self.client.get(reverse(
+                    f"plugins:netbox_oa:{route}", args=[document.pk],
+                ))
+                self.assertContains(response, "验收结果")
+                self.assertEqual(response.context[
+                    "acceptance_result" if route == "maintenance_verify" else "service_effect_label"
+                ], label)
+                self.assertNotContains(response, "服务效果")
+        for value in ("excellent", "good", "qualified", "unqualified"):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                self.form(service_effect=value)
+        for value, label in (("excellent", "优"), ("good", "良"),
+                             ("qualified", "合格"), ("unqualified", "不合格")):
+            self.assertEqual(service_effect_label(value), label)
 
     def test_three_handwritten_signatures_then_only_acceptance_form_is_stamped(self):
         self.application()
@@ -103,26 +132,16 @@ class AcceptanceTests(TestCase):
         self.assertEqual(self.current().name, "验收公司审批")
         self.assertFalse(self.current().signatures.exists())
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
-        self.assertEqual(self.current().name, "验收用印")
-        with self.assertRaises(ValidationError):
+        form.refresh_from_db()
+        self.assertTrue(form.electronic_seal)
+        self.assertEqual(form.electronic_seal["date"], timezone.localdate().isoformat())
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
             self.upload("acceptance", "scan", sealed=True)
-        self.complete()
-        self.assertEqual(self.current().name, "上传用印后验收单")
-        with self.assertRaisesMessage(ValidationError, "用印扫描件"):
-            services.complete_task(pk=self.current().pk, actor=acting_user(self))
-        with self.assertRaises(ValidationError):
-            self.upload("report", "scan", sealed=True)
-        sealed = self.upload("acceptance", "scan", sealed=True)
-        self.assertEqual(sealed.source_document_id, form.pk)
-        self.assertTrue(sealed.is_sealed)
         self.client.force_login(self.actor)
         review = self.client.get(reverse("plugins:netbox_oa:maintenance_review",
                                          args=[self.order.pk]), {"material": "acceptance"})
-        group = review.context["selected_group"]
-        self.assertEqual(len(group["index_rows"]), 1)
-        self.assertEqual([item["document"] for item in group["index_rows"][0]["files"]],
-                         [sealed, form])
-        services.complete_task(pk=self.current().pk, actor=acting_user(self))
+        files = review.context["selected_group"]["index_rows"][0]["files"]
+        self.assertEqual([item["document"] for item in files], [form])
         self.assertEqual(self.current().name, "生成付款")
         self.assertFalse(self.order.documents.filter(material__in=["report", "settlement"],
                                                      is_sealed=True).exists())
@@ -171,13 +190,16 @@ class AcceptanceTests(TestCase):
             self.sign()
             services.complete_task(pk=self.current().pk, actor=acting_user(self))
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
-        self.complete()
-        with self.assertRaisesMessage(ValidationError, "必须对应本次审批"):
+        original.refresh_from_db()
+        revised.refresh_from_db()
+        self.assertFalse(original.electronic_seal)
+        self.assertTrue(revised.electronic_seal)
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
             services.upload_document(pk=self.order.pk, actor=self.actor, material="acceptance",
                                      state="scan", source_document_id=original.pk,
                                      file=SimpleUploadedFile("wrong.pdf", b"scan"))
 
-    def test_print_has_codes_three_signature_dates_and_private_verification(self):
+    def test_print_has_codes_three_signature_dates_and_public_verification(self):
         self.application()
         form = self.apply()
         for _ in range(2):
@@ -186,9 +208,11 @@ class AcceptanceTests(TestCase):
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.client.force_login(self.actor)
         page = self.client.get(reverse("plugins:netbox_oa:maintenance_print", args=[form.pk]))
-        for text in ("工单验收单", "服务效果", "良", "1234.56", "复核人", "部门审核人",
-                     "申请人"):
+        for text in ("工单服务验收单", "验收结果", "通过", "￥1,234.56", "复核人", "部门审核",
+                     "验收人"):
             self.assertContains(page, text)
+        for text in ("服务要求", "申请人", "部门审核人"):
+            self.assertNotContains(page, text)
         self.assertEqual(len(page.context["signatures"]), 3)
         from netbox_oa.templatetags.oa_filters import chinese_date
 
@@ -201,7 +225,7 @@ class AcceptanceTests(TestCase):
         self.assertContains(page, verification)
         self.assertEqual(self.client.get(verification).status_code, 200)
         self.client.logout()
-        self.assertEqual(self.client.get(verification).status_code, 302)
+        self.assertContains(self.client.get(verification), self.order.number)
 
     def test_missing_service_effect_has_a_field_specific_message(self):
         self.application()
@@ -209,11 +233,11 @@ class AcceptanceTests(TestCase):
         url = reverse("plugins:netbox_oa:maintenance_company_form",
                       args=[self.order.pk, "acceptance"])
         page = self.client.get(url)
-        self.assertContains(page, 'data-required-message="请选择服务效果。"')
+        self.assertContains(page, 'data-required-message="请选择验收结果。"')
         page = self.client.post(url, {**company_form_initial(self.order),
                                       "settlement_amount": "1234.56", "service_effect": ""})
         self.assertEqual(page.status_code, 200)
-        self.assertEqual(page.context["form"].errors["service_effect"], ["请选择服务效果。"])
+        self.assertEqual(page.context["form"].errors["service_effect"], ["请选择验收结果。"])
 
     def test_upload_and_edit_entrypoints_follow_nodes_and_freeze_approval_evidence(self):
         self.application()

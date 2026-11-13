@@ -44,10 +44,24 @@ def schedule_for(order, actor):
         raise PermissionDenied("无权查看工单所属合同的计费规则。")
     schedule = getattr(contract, "maintenance_pricing", {}) or {}
     if not isinstance(schedule, dict) or schedule.get("schema_version") != 1:
-        raise ValidationError("所属合同尚未配置有效的维护收费标准，请先维护合同计费规则。")
+        raise ValidationError("所属合同尚未配置有效的维护收费标准。")
     if schedule.get("kind") != "framework" or schedule.get("currency") != "CNY":
         raise ValidationError("目前仅支持人民币框架代维收费标准。")
     return schedule
+
+
+def routine_maintenance_allowed(order, actor):
+    contract = purchase_contracts(actor).filter(pk=order.contract_id).first()
+    if contract is None:
+        raise PermissionDenied("无权查看工单所属合同的计费规则。")
+    return bool(contract.contract_type and contract.contract_type.name == "代维-日常")
+
+
+def calculate_for_order(order, actor, lines):
+    return calculate(
+        schedule_for(order, actor), lines,
+        allow_routine_maintenance=routine_maintenance_allowed(order, actor),
+    )
 
 
 def catalogue(schedule):
@@ -81,16 +95,18 @@ def configured(order):
 
 
 def service_time(value):
+    if value is None or value == "":
+        return None
     try:
         parsed = datetime.fromisoformat(value)
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed)
         return timezone.localtime(parsed)
     except (ValueError, TypeError, OverflowError):
-        raise ValidationError("请填写有效的服务开始和结束时间。") from None
+        raise ValidationError("请填写有效的服务开始和结束日期。") from None
 
 
-def calculate(schedule, lines):
+def calculate(schedule, lines, *, allow_routine_maintenance=False):
     if not isinstance(lines, list) or not 1 <= len(lines) <= 1000:
         raise ValidationError("每份工单须填写1至1000条计费明细。")
     rules = catalogue(schedule)
@@ -102,20 +118,26 @@ def calculate(schedule, lines):
                     or line["rule_key"] not in rules):
                 raise ValidationError("请选择所属合同中的计费条目。")
             rule = rules[line["rule_key"]]
+            routine = line.get("routine_maintenance", False)
+            if type(routine) is not bool:
+                raise ValidationError("日常代维选项格式不正确。")
+            if routine and not allow_routine_maintenance:
+                raise ValidationError("仅代维-日常合同可选择日常代维不计费项目。")
             start, end = service_time(line.get("started_at")), service_time(line.get("ended_at"))
-            if end.astimezone(datetime_timezone.utc) < start.astimezone(datetime_timezone.utc):
-                raise ValidationError("服务结束时间不得早于开始时间。")
+            if start and end and end.date() < start.date():
+                raise ValidationError("服务结束日期不得早于开始日期。")
             effective = schedule.get("effective", {})
-            for key, actual, lower in (("start_date", start.date(), True),
-                                       ("end_date", end.date(), False)):
+            for key, lower in (("start_date", True), ("end_date", False)):
                 boundary = effective.get(key)
                 if boundary:
                     try:
                         boundary = date.fromisoformat(boundary)
                     except (ValueError, TypeError):
                         raise ValidationError("合同生效日期配置无效。") from None
-                    if (lower and actual < boundary) or (not lower and actual > boundary):
-                        raise ValidationError("服务时间超出合同收费标准生效范围。")
+                    for actual in (start, end):
+                        if actual and ((lower and actual.date() < boundary)
+                                       or (not lower and actual.date() > boundary)):
+                            raise ValidationError("服务日期超出合同收费标准生效范围。")
             quantity = number(line.get("quantity", "1"), "数量", positive=True)
             deduction = number(line.get("deduction", "0"), "扣费金额")
             if deduction.as_tuple().exponent < -2:
@@ -163,6 +185,8 @@ def calculate(schedule, lines):
                 tier = deepcopy(tier)
                 unit_price = number(tier.get("unit_price"), "合同档位单价")
             elif method == "duration":
+                if not start or not end:
+                    raise ValidationError("按时长计费的条目缺少服务时长依据。")
                 elapsed = (end.astimezone(datetime_timezone.utc)
                            - start.astimezone(datetime_timezone.utc))
                 hours = (Decimal(elapsed.days * 86400 + elapsed.seconds)
@@ -185,7 +209,7 @@ def calculate(schedule, lines):
             gross = (unit_price * quantity).quantize(CENT, rounding=ROUND_HALF_UP)
             if gross > LIMIT or deduction > gross:
                 raise ValidationError("金额超出范围，或扣费金额大于服务价格。")
-            net = gross - deduction
+            net = Decimal(0) if routine else gross - deduction
             total += net
             if total > LIMIT:
                 raise ValidationError("结算总金额超出允许范围。")
@@ -193,11 +217,13 @@ def calculate(schedule, lines):
                 "rule_key": line["rule_key"], "rule": deepcopy(rule), "name": rule["name"],
                 "unit": UNITS.get(rule.get("unit"), rule.get("unit", "")),
                 "method_label": METHODS[method], "quantity": str(quantity),
-                "started_at": start.isoformat(), "ended_at": end.isoformat(),
+                "started_at": start.date().isoformat() if start else "",
+                "ended_at": end.date().isoformat() if end else "",
                 "specification": str(line.get("specification", "")), "tier": tier,
                 "tier_index": tier_index,
                 "hours": str(hours), "unit_price": str(unit_price), "gross": money(gross),
                 "deduction": money(deduction), "net": money(net),
+                "routine_maintenance": routine,
             })
         except ValidationError as exc:
             raise ValidationError([f"第{index}条：{message}" for message in exc.messages]) from None
@@ -279,7 +305,7 @@ def _save_billing(original, actor, lines):
         existing.order = order
         check_access(existing, actor)
         original = existing
-    data = calculate(schedule_for(order, actor), lines)
+    data = calculate_for_order(order, actor, lines)
     data["contract_id"] = order.contract_id
     data["contract_number"] = order.contract_number
     if original.pk and original.kind == "billing":

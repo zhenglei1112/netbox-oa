@@ -14,7 +14,6 @@ from netbox_oa.maintenance_flow import ROLES, build_steps
 from netbox_oa.maintenance_forms import MaintenanceActionForm
 from netbox_oa.models import MaintenanceOrder
 from netbox_oa.tests import test_maintenance
-from netbox_oa.tests.test_maintenance import acting_user
 
 REMOVED_PAYMENT_FIELDS = {
     "payment_amount",
@@ -36,9 +35,9 @@ class CurrentFlowTests(TestCase):
     reach = test_maintenance.MaintenanceTests.reach
 
     def test_only_current_roles_nodes_and_flags_are_built(self):
-        self.assertEqual(set(dict(ROLES)), {"reviewer", "department", "senior", "seal"})
+        self.assertEqual(set(dict(ROLES)), {"reviewer", "department", "senior"})
         nodes = build_steps({}, 24)
-        self.assertEqual(sum(not node.get("return_only") for node in nodes), 14)
+        self.assertEqual(sum(not node.get("return_only") for node in nodes), 10)
         self.assertFalse(
             {"order_fill", "paid", "receipt", "issue", "invoice_check"}
             & {node["key"] for node in nodes}
@@ -48,31 +47,19 @@ class CurrentFlowTests(TestCase):
                 "report_scans" not in node and "finish_on_application" not in node for node in nodes
             )
         )
-        self.assertEqual(self.policy.roles.count(), 4)
+        self.assertEqual(self.policy.roles.count(), 3)
         self.start()
         self.assertEqual(self.current().name, "工单复核")
 
-    def test_seal_then_requester_upload_for_both_company_forms(self):
-        self.start()
-        for material, label in (("order", "服务工单"), ("acceptance", "验收单")):
-            while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_seal":
-                self.complete()
-            seal_task = self.current()
-            with self.assertRaises(ValidationError):
-                self.upload(material, "scan", sealed=True)
-            self.complete()
-            seal_task.refresh_from_db()
-            self.assertEqual(seal_task.status, "completed")
-            upload_task = self.current()
-            self.assertEqual(upload_task.name, f"上传用印后{label}")
-            self.assertEqual(upload_task.assigned_user_id, self.order.requester_id)
-            self.assertIsNone(upload_task.assigned_group_id)
-            with self.assertRaisesMessage(ValidationError, "用印扫描件"):
-                services.complete_task(pk=upload_task.pk, actor=acting_user(self))
-            stamped = self.upload(material, "scan", sealed=True)
-            self.assertTrue(stamped.is_sealed)
-            self.assertEqual(stamped.uploaded_task_id, upload_task.pk)
-            self.complete()
+    def test_company_forms_are_electronically_sealed_without_upload_steps(self):
+        self.reach("payment_plan")
+        for material in ("order", "acceptance"):
+            document = self.order.documents.get(material=material, kind="form")
+            self.assertTrue(document.electronic_seal)
+            self.assertFalse(self.order.documents.filter(material=material, kind="scan").exists())
+        self.assertFalse(any(node["key"] in {
+            "order_seal", "order_sealed_upload", "acceptance_seal", "acceptance_sealed_upload",
+        } for node in self.order.steps_snapshot))
 
     def test_removed_payment_fields_are_absent_from_schema_forms_and_api(self):
         self.assertFalse(
@@ -204,7 +191,8 @@ class CurrentFlowMigrationTests(TransactionTestCase):
             remaining = new_apps.get_model("netbox_oa", "MaintenanceRole").objects.filter(
                 policy_id=policy.pk
             )
-            self.assertEqual(set(remaining.values_list("role", flat=True)), set(dict(ROLES)))
+            self.assertEqual(set(remaining.values_list("role", flat=True)),
+                             {"reviewer", "department", "senior", "seal"})
             self.assertTrue(
                 new_apps.get_model("users", "Group").objects.filter(pk=group.pk).exists()
             )

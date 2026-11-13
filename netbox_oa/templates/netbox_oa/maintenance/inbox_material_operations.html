@@ -9,6 +9,9 @@
     {% include 'netbox_oa/maintenance/upload_button.html' with order_id=detail.order.pk material_key=material.key %}
   {% endif %}
   <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
+{% elif material.can_print_now %}
+  <a class="btn btn-ghost-primary" title="打印" aria-label="打印" href="{% url 'plugins:netbox_oa:maintenance_print' pk=material.form_document.pk %}" target="_blank" rel="noopener"><i class="mdi mdi-printer" aria-hidden="true"></i></a>
+  <a class="btn btn-ghost-primary" title="查看" aria-label="查看" data-oa-open="review-{{ review_key }}" href="{{ detail_url }}&amp;panel=review-{{ review_key }}"><i class="mdi mdi-eye-outline" aria-hidden="true"></i></a>
 {% elif material.required_now %}
   {% if material.requires_filling and detail.can_act and material.can_fill %}
     {% if material.key == 'order' and detail.order_correction %}

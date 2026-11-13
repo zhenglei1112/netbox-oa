@@ -118,7 +118,7 @@ class MaintenanceTests(TestCase):
             order = MaintenanceOrder.objects.get(pk=self.order.pk)
             return services.save_company_form(
                 pk=order.pk, actor=self.actor, material=material,
-                data={**company_form_initial(order), "service_effect": "good",
+                data={**company_form_initial(order), "service_effect": "passed",
                       "settlement_amount": "1234.56"},
             )
         order = MaintenanceOrder.objects.get(pk=self.order.pk)
@@ -269,9 +269,9 @@ class MaintenanceTests(TestCase):
         self.assertContains(response, "每节点时限 1天12小时0分钟")
         self.assertContains(response, "提前 4小时0分钟预警")
         self.assertContains(response, "时限：1天12小时0分钟", count=len(nodes))
-        self.assertEqual(response.context["node_count"], 14)
+        self.assertEqual(response.context["node_count"], 10)
         self.assertEqual(response.context["correction_count"], 1)
-        self.assertContains(response, "5 个顺序环节")
+        self.assertContains(response, "3 个顺序环节")
         diagram = response.context["diagram"]
         sequential = [
             edge
@@ -303,13 +303,8 @@ class MaintenanceTests(TestCase):
             next(node for node in nodes if node["key"] == "acceptance_review")["return_label"],
             "验收申请",
         )
-        self.assertFalse(
-            next(node for node in nodes if node["key"] == "acceptance_sealed_upload")[
-                "return_label"
-            ]
-        )
         self.assertEqual(
-            [len(stage["nodes"]) for stage in response.context["stages"]], [6, 6, 3]
+            [len(stage["nodes"]) for stage in response.context["stages"]], [4, 4, 3]
         )
         by_key = {node["key"]: node for node in nodes}
         for key in ("acceptance_apply", "acceptance_apply", "payment_plan"):
@@ -317,7 +312,7 @@ class MaintenanceTests(TestCase):
             self.assertIsNone(by_key[key]["group"])
         self.assertIn("填写", by_key["acceptance_apply"]["rules"][0])
         self.assertIn("手写签名", by_key["acceptance_review"]["rules"][0])
-        self.assertIn("逐份上传", by_key["acceptance_sealed_upload"]["rules"][0])
+        self.assertIn("自动", by_key["acceptance_company"]["rules"][-1])
         self.assertIn("合同详情页", by_key["payment_plan"]["rules"][0])
         self.assertEqual(by_key["payment_eip"]["completion_label"], "工单完成；付款申请已提交")
         self.assertContains(response, "付款申请已提交 · 工单完成")
@@ -336,7 +331,7 @@ class MaintenanceTests(TestCase):
         for key in ("acceptance_apply", "acceptance_review", "acceptance_department",
                     "acceptance_company"):
             self.assertEqual(nodes[key]["materials"], [
-                "工单验收单 · 电子版",
+                "工单服务验收单 · 电子版",
                 "服务报告 · 扫描版（可多份）",
                 "服务结算单 · 扫描版（可多份）",
             ])
@@ -344,9 +339,9 @@ class MaintenanceTests(TestCase):
             self.assertEqual(nodes[key]["return_label"], "工单修正")
         self.assertEqual(nodes["payment_review"]["return_label"], "生成付款")
         self.assertEqual(nodes["order_correction"]["completion_label"], "重新进入工单复核")
-        self.assertIn("无需上传用印前扫描件", nodes["order_senior_seal"]["rules"][0])
+        self.assertIn("自动", nodes["order_senior_seal"]["rules"][0])
         self.assertIn("本次验收单版本", nodes["acceptance_department"]["rules"][1])
-        self.assertIn("审批原件", nodes["acceptance_sealed_upload"]["rules"][1])
+        self.assertNotIn("acceptance_sealed_upload", nodes)
         self.assertContains(response, "发起人不能审批自己发起的工单")
         self.assertContains(response, "验收复核使用复核人用户组")
         for key in ("report_fill", "settlement_fill", "order_department_seal"):
@@ -807,29 +802,12 @@ class MaintenanceCompanyFormTests(TestCase):
         edited = self.client.get(self.form_url())
         self.assertContains(edited, 'type="date"')
         self.assertContains(edited, 'value="' + data["requested_at"][:10] + '"')
-        self.reach("order_sealed_upload")
-        response = self.client.post(
-            reverse("plugins:netbox_oa:maintenance_upload", args=[self.order.pk]),
-            {
-                "material": "order",
-                "state": "scan",
-                "source_document_id": document.pk,
-                "file": SimpleUploadedFile("sealed.pdf", b"scan"),
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        scan = self.order.documents.get(kind="scan")
-        self.assertEqual(scan.source_document_id, document.pk)
-        self.assertEqual(scan.version, document.version + 1)
-        downloaded = self.client.get(scan.get_absolute_url())
-        self.assertEqual(downloaded.status_code, 200)
-        downloaded.close()
+        self.reach("acceptance_apply")
+        document.refresh_from_db()
+        self.assertTrue(document.electronic_seal)
+        self.assertFalse(self.order.documents.filter(kind="scan").exists())
         page = self.client.get(self.order.get_absolute_url())
-        self.assertContains(page, "填写表单")
-        self.assertContains(page, "下载用印扫描件")
-        self.assertContains(page, f"对应原件 v{document.version}")
-        self.assertNotContains(page, "完整流程节点")
-        self.assertNotContains(page, "关联业务对象")
+        self.assertNotContains(page, "用印后")
 
     def test_report_company_section_is_not_supplier_evidence(self):
         self.reach("acceptance_apply")
@@ -871,11 +849,11 @@ class MaintenanceCompanyFormTests(TestCase):
     def test_scan_rejects_stale_source_and_non_scan_file(self):
         original = self.upload("order")
         current = self.upload("order")
-        self.reach("order_sealed_upload")
+        self.reach("order_senior_seal")
         for source, filename, message in (
-            (original.pk, "scan.pdf", "必须对应本次审批"),
-            (current.pk, "scan.docx", "扫描件仅支持"),
-            (None, "scan.pdf", "必须对应本次审批"),
+            (original.pk, "scan.pdf", "仅保留系统电子件"),
+            (current.pk, "scan.docx", "仅保留系统电子件"),
+            (None, "scan.pdf", "仅保留系统电子件"),
         ):
             with self.subTest(source=source, filename=filename):
                 with self.assertRaisesMessage(ValidationError, message):
@@ -920,7 +898,7 @@ class MaintenanceCompanyFormTests(TestCase):
         services.return_task(
             pk=self.current().pk, actor=acting_user(self), comment="修订要求",
         )
-        with self.assertRaisesMessage(ValidationError, "无需上传用印前扫描件"):
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
             self.upload("order", sealed=True)
         with self.assertRaisesMessage(ValidationError, "退回补正后必须"):
             services.complete_task(pk=self.current().pk, actor=acting_user(self))
@@ -949,7 +927,7 @@ class MaintenanceCompanyFormTests(TestCase):
         self.assertEqual(self.client.get(self.form_url("settlement")).status_code, 404)
 
     def test_company_order_cannot_be_replaced_by_electronic_upload(self):
-        with self.assertRaisesMessage(ValidationError, "请在公司表单中填写生成"):
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
             services.upload_document(
                 pk=self.order.pk,
                 actor=self.actor,

@@ -171,31 +171,18 @@ class MaterialItemTests(TestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.steps_snapshot[self.current().position]["required"], [])
 
-    def test_order_has_one_logical_scan_and_preserves_prior_revisions(self):
-        self.reach("order_sealed_upload")
-        first = self.upload("order", "scan", sealed=True)
-        second = self.upload("order", "scan", sealed=True)
-        self.assertEqual((first.item_number, second.item_number), (1, 1))
-        self.assertEqual(second.source_document_id, first.source_document_id)
-        order = MaintenanceOrder.objects.get(pk=self.order.pk)
-        self.assertEqual(list(services.material_scan_sources(order, "order")),
-                         [first.source_document])
-        with self.assertRaisesMessage(ValidationError, "当前节点不能上传此扫描材料"):
-            services.upload_material_scans(
-                pk=order.pk, actor=self.actor, material="order",
-                files=[SimpleUploadedFile("one.pdf", b"scan"),
-                       SimpleUploadedFile("two.pdf", b"scan")],
-            )
+    def test_order_preserves_electronic_revisions_and_rejects_scans(self):
+        first = self.upload("order")
+        second = self.upload("order")
+        self.assertGreater(second.version, first.version)
+        self.reach("order_senior_seal")
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
+            self.upload("order", "scan", sealed=True)
         self.assertTrue(MaintenanceDocument.objects.filter(pk=first.pk).exists())
         self.client.force_login(self.actor)
         page_url = reverse("plugins:netbox_oa:maintenance_material_upload",
-                           args=[order.pk, "order"])
-        self.assertNotContains(self.client.get(page_url), "multiple")
-        rejected = self.client.post(page_url, {"file": [
-            SimpleUploadedFile("one.pdf", b"scan"), SimpleUploadedFile("two.pdf", b"scan"),
-        ]})
-        self.assertEqual(rejected.status_code, 200)
-        self.assertTrue(rejected.context["form"].errors)
+                           args=[self.order.pk, "order"])
+        self.assertEqual(self.client.get(page_url).status_code, 403)
 
     def test_each_report_is_independent_and_update_keeps_its_number(self):
         self.reach("acceptance_apply")
@@ -275,7 +262,7 @@ class MaterialItemTests(TestCase):
                     order_group = next(group for group in response.context["groups"]
                                        if group["key"] == "order")
                     self.assertEqual(len(order_group["index_rows"]), 1)
-                    self.assertEqual(len(order_group["documents"]), 2)
+                    self.assertEqual(len(order_group["documents"]), 1)
                     self.assertEqual(len(file_links), sum(len(group["documents"])
                                                          for group in response.context["groups"]))
                     self.assertContains(

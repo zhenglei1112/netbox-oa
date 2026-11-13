@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django import template
 from django.utils import timezone
@@ -9,6 +9,25 @@ from netbox_oa.choices import WorkflowStatus
 from netbox_oa.time_display import format_duration
 
 register = template.Library()
+
+
+def _money_amount(value):
+    try:
+        amount = Decimal(str(value))
+        if amount.is_finite() and abs(amount) < Decimal("10000000000000000"):
+            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if abs(amount) < Decimal("10000000000000000"):
+                return amount if amount else Decimal("0.00")
+    except (InvalidOperation, ValueError, TypeError):
+        pass
+    return None
+
+
+@register.filter
+def cny_number(value):
+    """Display yuan with a currency symbol, thousands separators and two decimals."""
+    amount = _money_amount(value)
+    return value if amount is None else f"￥{amount:,.2f}"
 
 
 @register.filter

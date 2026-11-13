@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.contrib import messages
+from django.contrib.auth.decorators import login_not_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -43,10 +44,11 @@ from .maintenance_materials import (
     ACCEPTANCE_SIGNING_NODES,
     COMPANY_FORMS,
     PRINTABLE_FORMS,
-    SERVICE_EFFECTS,
     SERVICE_ITEMS,
     TASK_SIGNING_NODES,
     company_form_initial,
+    service_effect_label,
+    service_type_values,
 )
 from .maintenance_payments import payment_context
 from .maintenance_presentation import InboxPresentation
@@ -75,24 +77,12 @@ def actionable_tasks(user):
 
 
 def personal_todo_tasks(user, tasks=None):
-    """Include requester seal reminders without granting task handling permission."""
+    """Tasks assigned to the current user or one of their groups."""
     tasks = actionable_tasks(user) if tasks is None else tasks
-    personal = tasks.filter(
+    return tasks.filter(
         Q(assigned_user=user)
         | Q(assigned_user__isnull=True, assigned_group__in=user.groups.all())
     )
-    reminders = MaintenanceTask.objects.restrict(user, "view").filter(
-        status="pending", kind="action", order__status="active", order__requester=user,
-        order__in=MaintenanceOrder.objects.restrict(user, "view"),
-        position=F("order__current_position"),
-    )
-    reminder_ids = [
-        pk for pk, position, steps in reminders.values_list(
-            "pk", "position", "order__steps_snapshot"
-        )
-        if position < len(steps) and steps[position].get("key") in {"order_seal", "acceptance_seal"}
-    ]
-    return personal | reminders.filter(pk__in=reminder_ids)
 
 
 def presentation(
@@ -187,7 +177,7 @@ def presentation(
         )
         if key in {"notice", "invoice"}:
             can_upload_now = node.get("key") == "payment_plan"
-        can_upload_now = can_upload_now and key in dict(MATERIALS)
+        can_upload_now = can_upload_now and key in dict(MATERIALS) and key not in COMPANY_FORMS
         current = summary["current"]
         stage_upload_required = bool(
             current and key in summary["required_materials"] and can_upload_now
@@ -258,6 +248,12 @@ def presentation(
                 "document": versions[0] if versions else None,
                 "versions": versions,
                 "form_document": form_document,
+                "can_print_now": bool(
+                    order.status == "active" and form_document and form_document.electronic_seal
+                    and (key, node.get("key")) in {
+                        ("order", "acceptance_apply"), ("acceptance", "payment_plan"),
+                    }
+                ),
                 "form_versions": [doc for doc in versions if doc.kind == "form"],
                 "can_fill": can_fill,
                 "attachments": attachments,
@@ -289,12 +285,11 @@ def presentation(
         return {**summary, "materials": materials}
     document_groups = [
         {"key": "electronic", "name": "电子版", "materials": []},
-        {"key": "sealed", "name": "用印后", "materials": []},
         {"key": "scan", "name": "扫描件", "materials": []},
     ]
     for material in materials:
         key = material["key"]
-        categories = document_groups[:2] if key in COMPANY_FORMS else document_groups[2:]
+        categories = document_groups[:1] if key in COMPANY_FORMS else document_groups[1:]
         for group in categories:
             category = group["key"]
             electronic = category == "electronic"
@@ -328,7 +323,8 @@ def presentation(
             })
     document_cards = [item for group in document_groups for item in group["materials"]]
     current_document_groups = [
-        {**group, "materials": [item for item in group["materials"] if item["required_now"]]}
+        {**group, "materials": [item for item in group["materials"]
+                               if item["required_now"] or item["can_print_now"]]}
         for group in document_groups
     ]
     current_document_groups = [group for group in current_document_groups if group["materials"]]
@@ -442,7 +438,7 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                     rules.append("填写并保存维护服务工单，核对外购合同、服务单位及服务省市")
                     rules.append("必须由申请人本人完成手写签名后提交；表单修订后须重新签名")
                 elif step_key == "acceptance_apply":
-                    rules.append("填写工单验收单，基本信息自动带入且只读，选择服务效果并填写结算金额")
+                    rules.append("填写工单服务验收单，基本信息自动带入且只读，选择验收结果并填写结算金额")
                     rules.append(
                         "至少上传一份服务报告和一份服务结算单扫描件，两类附件均无需用印；"
                         "支持多选或拖入 PDF、PNG、JPEG 文件，每份不超过 20 MB"
@@ -478,6 +474,8 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                             f"审核已签字的系统{material_name}表单，无需上传用印前扫描件；"
                             "修改材料须先退回工单修正"
                         )
+                if step_key in {"order_senior_seal", "acceptance_company"}:
+                    rules.append("审批通过后自动在本次电子表单上加盖公章和审批日期")
                 if step["kind"] == "external":
                     rules.append("必填外部付款申请单号，由经办人登记申请结果")
                 nodes.append(
@@ -515,11 +513,11 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
             stage_summary = {
                 "ordering": (
                     "申请人填写工单并签名，经复核、部门审核后直接进行工单公司审批，"
-                    "按审核通过的工单表单用印，上传用印后服务工单再进入工单验收。"
+                    "公司审批通过后自动加盖电子公章和日期，进入工单验收。"
                 ),
                 "acceptance": (
                     "填写验收单并上传服务报告、服务结算单，申请人、复核人和部门审核人签名后，"
-                    "经公司审批，办理验收单用印并上传用印件。"
+                    "公司审批通过后自动加盖电子公章和日期，进入付款申请。"
                 ),
                 "payment": "在合同中维护付款信息，经部门审核后登记外部付款申请。",
             }
@@ -757,13 +755,6 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
         response = render(
             request, "netbox_oa/maintenance/workbench_v2.html", context, status=status
         )
-        explicit_open = bool(pk or request.GET.get("selected", "").isdecimal())
-        ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        navigation = request.headers.get("X-OA-Navigation")
-        if (request.method == "GET" and status == 200 and selected and explicit_open
-                and not request.GET.get("history")
-                and (not ajax or navigation == "detail")):
-            services.record_order_view(pk=selected.pk, actor=request.user)
         return response
 
 
@@ -946,6 +937,7 @@ class MaintenanceOrderEditView(LoginRequiredMixin, View):
                         pk=pk,
                         actor=request.user,
                         expected_document_id=request.POST.get("expected_document_id") or None,
+                        audit=not ("_signature" in request.POST or "_submit" in request.POST),
                         **form.cleaned_data,
                     )
                     return order_form_result(request, order)
@@ -1578,16 +1570,17 @@ class MaintenancePrintView(LoginRequiredMixin, View):
                 "data": data,
                 "requested_at": data.get("requested_at", ""),
                 "service_items": SERVICE_ITEMS,
+                "selected_service_types": service_type_values(data.get("service_type")),
                 "priority_label": dict(MaintenanceOrder._meta.get_field("priority").choices).get(
                     data.get("priority", document.order.priority), "—"
                 ),
                 "signatures": signatures,
-                "service_effect_label": dict(SERVICE_EFFECTS).get(data.get("service_effect"), "—"),
+                "service_effect_label": service_effect_label(data.get("service_effect")),
                 "acceptance_signatures": [
                     {"label": label, **signatures.get(key, {})}
-                    for key, label in (("acceptance_apply", "申请人"),
+                    for key, label in (("acceptance_apply", "验收人"),
                                        ("acceptance_review", "复核人"),
-                                       ("acceptance_department", "部门审核人"))
+                                       ("acceptance_department", "部门审核"))
                 ],
             },
         )
@@ -1604,40 +1597,31 @@ class MaintenancePrintEventView(LoginRequiredMixin, View):
         return JsonResponse({"recorded": True, "event_id": event.pk})
 
 
+@method_decorator(login_not_required, name="dispatch")
 @method_decorator(never_cache, name="dispatch")
-class MaintenanceVerificationView(LoginRequiredMixin, View):
+class MaintenanceVerificationView(View):
     def get(self, request, pk):
+        from .maintenance_verification import verification_context
+
+        # Keep the existing URL so previously printed QR codes also work.
         document = get_object_or_404(
-            MaintenanceDocument.objects.restrict(request.user, "view").select_related(
+            MaintenanceDocument.objects.select_related(
                 "order", "order__requester"
             ),
-            pk=pk, material__in=COMPANY_FORMS, kind="form",
+            pk=pk, material__in=COMPANY_FORMS, kind="form", removed_at__isnull=True,
         )
-        order = document.order
-        _allowed(MaintenanceOrder, request.user, "view", order.pk)
-        inbox = InboxPresentation([order], request.user, actionable_tasks(request.user))
-        tasks = inbox.tasks[order.pk]
-        payment_task = next((
-            task for task in reversed(tasks)
-            if task.status == "completed"
-            and order.steps_snapshot[task.position]["key"] == "payment_eip"
-        ), None)
-        latest = order.documents.restrict(request.user, "view").filter(
-            material=document.material, kind="form"
-        ).first()
-        return render(request, "netbox_oa/maintenance/verify.html", {
-            "order": order, "document": document, "data": document.form_data,
-            "service_effect_label": dict(SERVICE_EFFECTS).get(
-                document.form_data.get("service_effect"), "—"
-            ),
-            "service_type_label": dict(
-                MaintenanceOrder._meta.get_field("service_type").choices
-            ).get(document.form_data.get("service_type"), "—"),
-            "is_latest": bool(latest and latest.pk == document.pk),
-            "summary": inbox.summary(order), "payment_task": payment_task,
-            "history": inbox.history(order, 100),
-            **payment_context(order, request.user),
-        })
+        if request.method == "GET":
+            # Atomic increment without a changelog entry per scan; HEAD does not count.
+            MaintenanceDocument.objects.filter(pk=document.pk).update(
+                scan_count=F("scan_count") + 1
+            )
+            document.refresh_from_db(fields=["scan_count"])
+        response = render(
+            request, "netbox_oa/maintenance/verify.html", verification_context(document)
+        )
+        response["Referrer-Policy"] = "no-referrer"
+        response["X-Robots-Tag"] = "noindex, nofollow"
+        return response
 
 
 class MaintenanceLinkView(LoginRequiredMixin, View):

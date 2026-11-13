@@ -7,15 +7,15 @@
   <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
   <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261111-1">
-  <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261021-1" defer></script>
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261113-5">
+  <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261111-1" defer></script>
 </head>
 <body data-audit-url="{% url 'plugins:netbox_oa:maintenance_print_event' pk=document.pk %}" data-csrf-token="{{ csrf_token }}">
-{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ print_return_url|default:document.order.get_absolute_url }}">返回工单 / 上传扫描件</a></nav>{% endif %}
+{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ print_return_url|default:document.order.get_absolute_url }}">返回工单</a></nav>{% endif %}
 <main class="print-sheet {% if document.material == 'report' %}report-sheet{% else %}order-sheet{% endif %}">
   {% if document.material == 'order' %}
     <h1>中交信通光缆及相关机房环境设备<br>维护服务工单</h1>
-  {% elif document.material == 'acceptance' %}<h1>工单验收单</h1>{% else %}<h1>服务报告</h1>{% endif %}
+  {% elif document.material == 'acceptance' %}<h1>工单服务验收单</h1>{% else %}<h1>服务报告</h1>{% endif %}
   {% if document.material == 'order' or document.material == 'acceptance' %}
   <div class="order-number-block" style="--barcode-width:{{ barcode_width }}">
     <p class="document-number" aria-label="{{ data.number }}">{% for character in data.number %}<span>{{ character }}</span>{% endfor %}</p>
@@ -31,13 +31,13 @@
     {% if document.material == 'order' %}<tr><th>联系电话</th><td class="latin-text">{{ data.contact_phone }}</td><th>紧急程度</th><td>{{ priority_label }}</td></tr>{% endif %}
     <tr><th>合同编号</th><td>{{ data.contract_number }}</td><th>{% if document.material == 'report' %}维护单位{% else %}服务单位{% endif %}</th><td>{{ data.supplier }}</td></tr>
     <tr><th>服务省市</th><td>{{ data.service_region }}</td><th>服务位置</th><td>{{ data.service_location }}</td></tr>
-    <tr class="service-items-row"><th>服务项目<br>（单选）</th><td colspan="3"><div class="service-choices">{% for key,label in service_items %}<span class="service-choice">{% if data.service_type == key %}☑{% else %}□{% endif %} {{ label }}</span>{% endfor %}</div></td></tr>
+    <tr class="service-items-row"><th>服务项目</th><td colspan="3"><div class="service-choices">{% for key,label in service_items %}<span class="service-choice">{% if key in selected_service_types %}☑{% else %}□{% endif %} {{ label }}</span>{% endfor %}</div></td></tr>
     {% if document.material == 'order' %}
       <tr class="requirements-row"><th>服务要求</th><td colspan="3" class="requirements">{{ data.requirements|linebreaksbr }}</td></tr>
       <tr class="applicant-row"><th>申请人</th><td>{% if signatures.applicant.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.applicant.image_id %}" alt="{{ signatures.applicant.name }}的手写签名">{% else %}{{ signatures.applicant.name|default:data.signature }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.applicant.date|default:data.signature_date|chinese_date|default:'____年__月__日' }}</td></tr>
       <tr class="applicant-row"><th>复核</th><td>{% if signatures.order_review.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_review.image_id %}" alt="{{ signatures.order_review.name }}的手写签名">{% else %}{{ signatures.order_review.name }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.order_review.date|chinese_date|default:'____年__月__日' }}</td></tr>
       <tr class="applicant-row"><th>部门审核</th><td>{% if signatures.order_final.image_id %}<img class="handwritten-signature" src="{% url 'plugins:netbox_oa:maintenance_signature_image' pk=signatures.order_final.image_id %}" alt="{{ signatures.order_final.name }}的手写签名">{% else %}{{ signatures.order_final.name }}{% endif %}</td><th>日期</th><td class="latin-text">{{ signatures.order_final.date|chinese_date|default:'____年__月__日' }}</td></tr>
-      <tr class="seal-row"><td colspan="4" class="seal-cell"><div class="seal-block"><strong>甲方：{{ data.company_name }}</strong><strong>盖章：</strong><strong class="seal-date">日期：</strong></div><template class="print-code-template"><a class="verification-code" href="{{ verification_url }}"><img src="{{ verification_qr }}" alt="工单信息核验二维码"></a></template></td></tr>
+      <tr class="seal-row"><td colspan="4" class="seal-cell"><div class="seal-block"><strong>甲方：<span class="filled-text">{{ data.company_name }}</span></strong>{% include "netbox_oa/maintenance/electronic_seal.html" %}</div><template class="print-code-template"><a class="verification-code" href="{{ verification_url }}"><img src="{{ verification_qr }}" alt="工单信息核验二维码"></a></template></td></tr>
     {% else %}
       <tr><th colspan="4" class="section-heading">乙方填写</th></tr>
       <tr><th>服务开始时间</th><td class="blank-cell"></td><th>服务结束时间</th><td></td></tr>

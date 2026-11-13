@@ -1,12 +1,11 @@
 {% load oa_filters %}
-<tr aria-label="收费明细"><th colspan="20" class="section-heading">收费明细</th></tr>
-<tr class="billing-row"><th colspan="1">序号</th><th colspan="3">服务项目</th><th colspan="4">服务时间</th><th colspan="4">计费依据</th><th colspan="2">数量</th><th colspan="2">服务价格（元）</th><th colspan="2">扣费金额（元）</th><th colspan="2">结算价格（元）</th></tr>
+<tr aria-label="结算明细"><th colspan="20" class="section-heading">结算明细（单位：元）</th></tr>
+<tr class="billing-row"><th colspan="1">序号</th><th colspan="5">服务项目</th><th colspan="6">计费依据</th><th colspan="2">数量</th><th colspan="2">服务价格</th><th colspan="2">扣费金额</th><th colspan="2">结算价格</th></tr>
 {% for item in snapshot.documents %}
     {% for line in item.billing_data.lines %}<tr class="billing-row">
-      <td colspan="1">{{ forloop.counter }}</td><td colspan="3">{{ line.name }}</td>
-      <td colspan="4">{{ line.started_at|oa_datetime }}<br>至<br>{{ line.ended_at|oa_datetime }}</td>
-      <td colspan="4">{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %}<br>单价 {{ line.unit_price }} 元{% if line.rule.method == 'duration' %}<br>服务时长 {{ line.hours|duration_hours }}{% endif %}</td>
+      <td colspan="1">{{ forloop.counter }}</td><td colspan="5">{{ line.name }}{% if line.routine_maintenance %} <span class="routine-maintenance-label">日常代维</span>{% endif %}</td>
+      <td colspan="6">{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %} {{ line.unit_price }} 元{% if line.rule.method == 'duration' %}<br>服务时长 {{ line.hours|duration_hours }}{% endif %}</td>
       <td colspan="2">{{ line.quantity }} {{ line.unit }}</td><td colspan="2">{{ line.gross }}</td><td colspan="2">{{ line.deduction }}</td><td colspan="2">{{ line.net }}</td>
     </tr>{% endfor %}
 {% endfor %}
-<tr><td colspan="20" class="billing-total">合计（元）：{{ snapshot.total }}</td></tr>
+<tr><td colspan="20" class="billing-total"><span class="column-label">合计：</span>{{ snapshot.total }}</td></tr>

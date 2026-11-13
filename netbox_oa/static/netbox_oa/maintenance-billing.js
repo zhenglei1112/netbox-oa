@@ -7,12 +7,16 @@
   const payload = form.querySelector('[name="lines"]');
   const status = form.querySelector('[data-billing-status]');
   const total = form.querySelector('[data-billing-total]');
+  const refresh = form.querySelector('[data-billing-refresh]');
+  const save = form.querySelector('[data-billing-save]');
+  const contractLink = form.querySelector('[data-billing-contract-link]');
   let sequence = 0;
   let timer;
 
   function values() {
     return [...container.children].map(row => Object.fromEntries(
-      [...row.querySelectorAll('[data-field]')].map(field => [field.dataset.field, field.value])
+      [...row.querySelectorAll('[data-field]')].map(field => [field.dataset.field,
+        field.type === 'checkbox' ? field.checked : field.value])
     ));
   }
   function sync() {
@@ -74,8 +78,7 @@
         ? (key === 'tier_index' ? '请选择规格值。' : '请选择合同计费条目。')
         : `请填写${label.split('（')[0]}。`;
       if (type === 'number') {input.min = '0'; input.step = key === 'deduction' ? '.01' : '.000001';}
-      if (key !== 'tier_index') input.required = true;
-      if (type === 'datetime-local') input.step = '1';
+      if (key !== 'tier_index' && type !== 'date') input.required = true;
       wrapper.append(text, input);
       fields.append(wrapper);
       input.value = value[key] ?? defaultValue;
@@ -87,13 +90,22 @@
     for (const rule of rules) {
       const option = document.createElement('option');
       option.value = rule.rule_key;
-      option.textContent = `${rule.code} · ${rule.name}`;
+      const specification = typeof rule.specification === 'string' ? rule.specification.trim() : '';
+      option.textContent = rule.group === 'materials'
+        ? [rule.name, specification].filter(Boolean).join('/')
+        : `${rule.code} · ${rule.name}`;
       select.append(option);
+    }
+    if (value.rule_key && !rules.some(rule => rule.rule_key === value.rule_key)) {
+      const missing = document.createElement('option');
+      missing.value = value.rule_key;
+      missing.textContent = '原计费条目已失效，请重新选择';
+      select.append(missing);
     }
     select.value = value.rule_key || '';
     for (const key of ['started_at', 'ended_at']) {
-      field(key, key === 'started_at' ? '服务开始时间' : '服务结束时间', 'datetime-local').value =
-        (value[key] || '').slice(0, 19);
+      field(key, key === 'started_at' ? '服务开始日期' : '服务结束日期', 'date').value =
+        (value[key] || '').slice(0, 10);
     }
     const spec = field('tier_index', '规格值', 'select');
     const specWrapper = fields.children[fields.children.length - 1];
@@ -108,6 +120,27 @@
     field('quantity', '数量（次／班次／台／公里／个）', 'number', '1');
     field('deduction', '扣费金额（元）', 'number', '0');
     body.append(fields);
+    if (container.dataset.routineMaintenanceAllowed === '1') {
+      const deduction = fields.children[fields.children.length - 1];
+      const deductionGroup = document.createElement('div');
+      deductionGroup.className = 'col-md-4 form-label d-flex align-items-end gap-3';
+      deduction.className = 'form-label flex-grow-1 mb-0';
+      deduction.remove();
+      deductionGroup.append(deduction);
+      fields.append(deductionGroup);
+      const label = document.createElement('label');
+      label.className = 'form-check mb-2 flex-shrink-0';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'form-check-input';
+      checkbox.dataset.field = 'routine_maintenance';
+      checkbox.checked = value.routine_maintenance === true;
+      const caption = document.createElement('span');
+      caption.className = 'form-check-label';
+      caption.textContent = '日常代维';
+      label.append(checkbox, caption);
+      deductionGroup.append(label);
+    }
     const description = document.createElement('p');
     description.className = 'text-muted mt-3'; body.append(description);
     function describe(restoring = false) {
@@ -163,6 +196,39 @@
   form.querySelector('[data-billing-add]').addEventListener('click', () => {add(); sync();});
   container.addEventListener('input', sync);
   container.addEventListener('change', sync);
+  refresh?.addEventListener('click', async () => {
+    refresh.disabled = true;
+    const wasDisabled = save?.disabled;
+    if (save) save.disabled = true;
+    sequence += 1;
+    clearTimeout(timer);
+    status.textContent = '正在刷新收费标准…';
+    status.hidden = false;
+    const url = new URL(form.action || location.href);
+    url.searchParams.delete('preview');
+    url.searchParams.set('refresh_pricing', '1');
+    try {
+      const response = await fetch(url, {credentials: 'same-origin', cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.rules)) {
+        throw new Error(data.error || '刷新收费标准失败。');
+      }
+      const current = values();
+      rules.splice(0, rules.length, ...data.rules);
+      container.dataset.routineMaintenanceAllowed = data.routine_maintenance_allowed ? '1' : '0';
+      container.replaceChildren();
+      for (const line of current) add(line);
+      if (contractLink) contractLink.hidden = rules.length > 0;
+      if (save) save.disabled = !rules.length;
+      sync();
+    } catch (error) {
+      if (save) save.disabled = wasDisabled;
+      status.textContent = error.message || '刷新收费标准失败，请重试。';
+      status.hidden = false;
+    } finally {
+      refresh.disabled = false;
+    }
+  });
   form.addEventListener('submit', () => {payload.value = JSON.stringify(values());});
   sync();
 })();

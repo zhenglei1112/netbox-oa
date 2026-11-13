@@ -11,14 +11,13 @@ ROLES = (
     ("reviewer", "复核人"),
     ("department", "部门负责人"),
     ("senior", "上级负责人"),
-    ("seal", "印章管理人"),
 )
 # Requirements may use "sealed" as a proof requirement, not a document state.
 MATERIALS = (
     ("order", "维护服务工单"),
     ("report", "服务报告"),
     ("settlement", "服务结算单"),
-    ("acceptance", "工单验收单"),
+    ("acceptance", "工单服务验收单"),
     ("notice", "付款通知书"),
     ("invoice", "电子发票"),
 )
@@ -90,24 +89,6 @@ def build_steps(groups, sla_hours):
         required=(("order", "electronic"),),
         return_to="order_correction",
     )
-    add(
-        "ordering",
-        "order_seal",
-        "服务工单用印",
-        "action",
-        "seal",
-        required=(("order", "electronic"),),
-    )
-    add(
-        "ordering",
-        "order_sealed_upload",
-        "上传用印后服务工单",
-        "submission",
-        "requester",
-        required=(("order", "sealed"),),
-    )
-    for node in nodes[-3:]:
-        node["scan_material"] = "order"
 
     requirements = (("acceptance", "electronic"), ("report", "scan"), ("settlement", "scan"))
     add("acceptance", "acceptance_apply", "验收申请", "submission", "requester",
@@ -121,12 +102,6 @@ def build_steps(groups, sla_hours):
             return_to="acceptance_apply")
     for node in nodes[-4:]:
         node["scan_materials"] = ["report", "settlement"]
-    add("acceptance", "acceptance_seal", "验收用印", "action", "seal",
-        required=(("acceptance", "electronic"),))
-    add("acceptance", "acceptance_sealed_upload", "上传用印后验收单", "submission", "requester",
-        required=(("acceptance", "sealed"),))
-    for node in nodes[-2:]:
-        node["scan_material"] = "acceptance"
 
     add(
         "payment",
@@ -134,7 +109,7 @@ def build_steps(groups, sla_hours):
         "生成付款",
         "submission",
         "requester",
-        required=(("acceptance", "sealed"), ("settlement", "scan"),
+        required=(("acceptance", "electronic"), ("settlement", "scan"),
                   ("notice", "electronic"), ("invoice", "electronic")),
     )
     add(
@@ -143,14 +118,15 @@ def build_steps(groups, sla_hours):
         "付款部门审核",
         "approval",
         "department",
-        required=(("acceptance", "sealed"), ("settlement", "scan"),
+        required=(("acceptance", "electronic"), ("settlement", "scan"),
                   ("notice", "electronic"), ("invoice", "electronic")),
         return_to="payment_plan",
         payment="submitted",
     )
     for node in nodes:
         if node["key"] in {"payment_plan", "payment_review"}:
-            node["scan_material"] = "acceptance"
+            node["scan_materials"] = ["settlement"]
+            node["require_electronic_seal"] = "acceptance"
             node["payment_contract_stage"] = True
 
     add(

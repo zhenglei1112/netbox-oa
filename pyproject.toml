@@ -17,7 +17,7 @@ dev = ["Django==5.2.6", "djangorestframework==3.16.1", "django-filter==25.1", "d
 include = ["netbox_oa*"]
 
 [tool.setuptools.package-data]
-netbox_oa = ["templates/**/*.html", "static/**/*"]
+netbox_oa = ["templates/**/*.html", "static/**/*", "assets/*.png"]
 
 [tool.ruff]
 line-length = 100

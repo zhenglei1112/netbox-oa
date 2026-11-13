@@ -81,7 +81,7 @@ class InboxTests(TestCase):
             "</section>", 1
         )[0]
         self.assertIn("工单资料库", section)
-        self.assertEqual(section.count('<article class="oa-document-card'), len(MATERIALS) + 2)
+        self.assertEqual(section.count('<article class="oa-document-card'), len(MATERIALS))
         for _, name in MATERIALS:
             self.assertIn(name, section)
         self.assertNotIn("oa-library-overview", section)
@@ -261,7 +261,8 @@ class InboxTests(TestCase):
     def test_seal_stages_hide_upload_and_reject_upload_page(self):
         self.start()
         for material in ("order", "acceptance"):
-            while self.order.steps_snapshot[self.current().position]["key"] != f"{material}_seal":
+            key = {"order": "order_senior_seal", "acceptance": "acceptance_company"}[material]
+            while self.order.steps_snapshot[self.current().position]["key"] != key:
                 self.complete()
             response = self.page()
             item = next(item for item in response.context["detail"]["materials"]
@@ -286,17 +287,9 @@ class InboxTests(TestCase):
             "</article>", 1
         )[0]
         self.assertNotIn('aria-label="上传"', card)
-        for stage in ("order_sealed_upload", "acceptance_sealed_upload"):
-            while self.order.steps_snapshot[self.current().position]["key"] != stage:
-                self.complete()
-            with self.subTest(stage=stage):
-                response = self.page()
-                card = response.content.decode().split(
-                    '<article class="oa-document-card', 1
-                )[1].split("</article>", 1)[0]
-                self.assertNotIn('aria-label="打印"', card)
-                self.assertIn('aria-label="上传"', card)
-                self.assertIn('aria-label="查看"', card)
+        self.complete()
+        self.assertEqual(self.current().name, "验收申请")
+        self.assertNotContains(self.page(), "用印后")
 
     def test_payment_error_shows_every_missing_material_without_state_explanation(self):
         self.reach("payment_plan")
@@ -337,46 +330,70 @@ class InboxTests(TestCase):
                 cards = html.split('<article class="oa-document-card')[1:]
                 for card in cards:
                     card = card.split("</article>", 1)[0]
-                    if "维护服务工单" not in card and "工单验收单" not in card:
+                    if "维护服务工单" not in card and "工单服务验收单" not in card:
                         self.assertIn("扫描件", card)
                         self.assertNotIn('aria-label="编辑"', card)
                 self.assertNotIn("无需填写", html)
                 self.assertEqual(
                     [(group["name"], [item["key"] for item in group["materials"]])
                      for group in response.context["detail"]["document_groups"]],
-                    [("电子版", ["order", "acceptance"]), ("用印后", ["order", "acceptance"]),
+                    [("电子版", ["order", "acceptance"]),
                      ("扫描件", ["report", "settlement", "notice", "invoice"])],
                 )
                 self.assertNotIn("甲方表单用于填写基础信息", html)
 
 
-    def test_electronic_and_sealed_cards_keep_separate_files_and_preview(self):
-        self.reach("order_sealed_upload")
-        response = self.page()
-        detail = response.context["detail"]
-        electronic = detail["document_groups"][0]["materials"][0]
-        sealed = detail["document_groups"][1]["materials"][0]
-        self.assertIsNotNone(electronic["current_file"])
-        self.assertIsNone(sealed["current_file"])
-        self.assertFalse(electronic["required_now"])
-        self.assertTrue(sealed["required_now"])
-        self.assertFalse(electronic["can_upload_now"])
-        self.assertFalse(sealed["can_fill"])
-        url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
-        preview = self.client.get(url, {"material": "order", "category": "sealed"})
-        self.assertIsNone(preview.context["selected"])
-        self.assertContains(preview, "此类材料暂无可查看文件")
-        uploaded = self.upload("order", sealed=True)
+    def test_company_forms_use_only_electronic_cards_and_preview(self):
+        self.reach("acceptance_apply")
         detail = self.page().context["detail"]
-        self.assertEqual(detail["document_groups"][0]["materials"][0]["current_file"].pk,
-                         electronic["current_file"].pk)
-        self.assertEqual(detail["document_groups"][1]["materials"][0]["current_file"].pk,
-                         uploaded.pk)
-        for category, document in (
-            ("electronic", electronic["current_file"]), ("sealed", uploaded)
-        ):
-            preview = self.client.get(url, {"material": "order", "category": category})
-            self.assertEqual(preview.context["selected"].pk, document.pk)
+        self.assertEqual([group["key"] for group in detail["document_groups"]],
+                         ["electronic", "scan"])
+        electronic = detail["document_groups"][0]["materials"][0]
+        self.assertTrue(electronic["current_file"].electronic_seal)
+        self.assertFalse(electronic["can_upload_now"])
+        url = reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk])
+        preview = self.client.get(url, {"material": "order", "category": "electronic"})
+        self.assertEqual(preview.context["selected"].pk, electronic["current_file"].pk)
+        self.assertNotContains(preview, "用印后")
+
+    def test_approved_forms_are_printable_in_next_submission_workspace(self):
+        self.start()
+        for step, key in (("acceptance_apply", "order"), ("payment_plan", "acceptance")):
+            with self.subTest(step=step, material=key):
+                while self.order.steps_snapshot[self.current().position]["key"] != step:
+                    self.complete()
+                response = self.page()
+                current_cards = [
+                    item for group in response.context["detail"]["current_document_groups"]
+                    for item in group["materials"]
+                ]
+                material = next(item for item in current_cards if item["key"] == key)
+                self.assertTrue(material["can_print_now"])
+                document = material["form_document"]
+                self.assertTrue(document.electronic_seal)
+                section = response.content.decode().split(
+                    '<section class="oa-document-section"', 1
+                )[1].split("</section>", 1)[0]
+                card = next(card.split("</article>", 1)[0]
+                            for card in section.split('<article class="oa-document-card')[1:]
+                            if material["name"] in card.split("</article>", 1)[0])
+                url = reverse("plugins:netbox_oa:maintenance_print", args=[document.pk])
+                self.assertIn('aria-label="打印"', card)
+                self.assertIn(url, card)
+                self.assertIn('aria-label="查看"', card)
+                self.assertNotIn('aria-label="编辑"', card)
+                self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_unapproved_forms_do_not_offer_next_stage_printing(self):
+        self.start()
+        for step, key in (("order_senior_seal", "order"),
+                          ("acceptance_company", "acceptance")):
+            with self.subTest(step=step):
+                while self.order.steps_snapshot[self.current().position]["key"] != step:
+                    self.complete()
+                detail = self.page().context["detail"]
+                material = next(item for item in detail["materials"] if item["key"] == key)
+                self.assertFalse(material["can_print_now"])
 
     def test_non_filling_material_operations_always_offer_read_alongside_upload(self):
         for key, _ in MATERIALS:
@@ -446,8 +463,7 @@ class InboxTests(TestCase):
         self.assertEqual(self.client.get(url, {"document": 99999}).status_code, 404)
 
     def test_review_file_types_keep_their_order_and_selected_version(self):
-        self.reach("order_sealed_upload")
-        self.upload("order", sealed=True)
+        self.reach("acceptance_apply")
         self.client.force_login(self.actor)
         response = self.client.get(
             reverse("plugins:netbox_oa:maintenance_review", args=[self.order.pk]),
@@ -457,7 +473,7 @@ class InboxTests(TestCase):
         files = [attrs for tag, attrs in markup.elements
                  if tag == "a" and "material-file" in attrs.get("class", "").split()]
         self.assertEqual({attrs["data-file-type"] for attrs in files},
-                         {"sealed", "electronic"})
+                         {"electronic", "scan"})
         selected = [attrs for attrs in files if attrs.get("aria-current") == "page"]
         self.assertEqual(len(selected), 1)
         self.assertIn("btn-primary", selected[0]["class"].split())
@@ -757,7 +773,6 @@ class InboxTests(TestCase):
     def test_material_upload_operations_are_in_current_cards_at_each_stage(self):
         self.start()
         for step, label in (
-            ("order_sealed_upload", 'aria-label="上传"'),
             ("acceptance_apply", 'aria-label="上传"'),
             ("acceptance_apply", 'aria-label="上传"'),
         ):
@@ -1057,39 +1072,14 @@ class InboxTests(TestCase):
         self.assertEqual(self.page(actor=worker, tab="todo").context["total"], 0)
         self.assertEqual(self.page(actor=worker, tab="delegate").context["total"], 0)
 
-    def test_seal_stages_also_appear_in_requester_todo_without_handling_permission(self):
+    def test_removed_seal_steps_do_not_create_requester_reminders(self):
+        self.reach("order_senior_seal")
         requester = self.worker("seal_requester")
-        sealer = self.worker("assigned_sealer")
-        outsider = self.worker("seal_outsider")
-        for user in (requester, sealer, outsider):
-            self.grant(user, "maintenancetask", "view")
-        self.start()
-        for key in ("order_seal", "acceptance_seal"):
-            while self.order.steps_snapshot[self.current().position]["key"] != key:
-                self.complete()
-            task = self.current()
-            MaintenanceTask.objects.filter(pk=task.pk).update(assigned_user=sealer)
-            self.assertEqual(self.page(actor=self.actor, tab="todo").context["total"], 1)
-            self.assertEqual(self.page(actor=self.actor, tab="delegate").context["total"], 0)
-            MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=requester)
-            with self.subTest(key=key):
-                response = self.page(actor=requester, tab="todo")
-                self.assertEqual(response.context["total"], 1)
-                self.assertEqual(response.context["stats"]["todo"], 1)
-                self.assertFalse(response.context["rows"][0]["can_act"])
-                self.assertEqual(self.page(actor=requester, tab="done").context["total"], 0)
-                self.assertEqual(self.page(actor=requester, tab="delegate").context["total"], 0)
-                self.assertEqual(self.page(actor=outsider, tab="todo").context["total"], 0)
-                self.assertEqual(self.page(actor=sealer, tab="todo").context["total"], 1)
-                self.assertEqual(self.action("complete", actor=requester).status_code, 403)
-                task.refresh_from_db()
-                self.assertEqual(task.assigned_user_id, sealer.pk)
-                self.assertEqual(task.status, "pending")
-            MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=self.actor)
-            self.complete()
-            MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=requester)
-            self.assertEqual(self.page(actor=requester, tab="todo").context["total"], 0)
-            MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=self.actor)
+        self.grant(requester, "maintenancetask", "view")
+        MaintenanceOrder.objects.filter(pk=self.order.pk).update(requester=requester)
+        response = self.page(actor=requester, tab="todo")
+        self.assertEqual(response.context["total"], 0)
+
 
     def test_draft_todo_only_shows_requesters_own_editable_drafts(self):
         self.assertEqual(self.page(self.actor, tab="todo").context["total"], 1)

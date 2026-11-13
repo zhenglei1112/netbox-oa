@@ -1,0 +1,3 @@
+{% load oa_filters %}<div class="seal-stamp-line"><strong>盖章：</strong>
+{% if document.electronic_seal %}<img class="electronic-seal" src="{{ document.electronic_seal.image }}" alt="中交信通维护部电子公章">{% endif %}</div>
+<strong class="seal-date"><span class="column-label">日期：</span><span class="filled-text">{% if document.electronic_seal %}{{ document.electronic_seal.date|chinese_date }}{% endif %}</span></strong>

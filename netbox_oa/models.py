@@ -13,7 +13,7 @@ from netbox.models import ChangeLoggedModel
 from .choices import TaskStatus, WorkflowStatus
 from .maintenance_flow import DOCUMENT_MATERIALS, ROLES, STAGES
 from .storage import MaintenanceDocumentStorage
-from .validators import validate_payload, validate_steps
+from .validators import validate_payload, validate_service_types, validate_steps
 
 
 class WorkflowDefinition(ChangeLoggedModel):
@@ -321,17 +321,8 @@ class MaintenanceOrder(MaintenanceChangeLogMixin, WorkflowStateModel):
         related_name="maintenance_orders",
         verbose_name="线路主管",
     )
-    service_type = models.CharField(
-        max_length=20,
-        choices=(
-            ("fiber", "光缆故障"),
-            ("construction", "施工盯防"),
-            ("air", "空调保养"),
-            ("inspection", "巡检服务"),
-            ("cutover", "割接盯防"),
-            ("power", "供电故障"),
-        ),
-        verbose_name="服务项目",
+    service_type = models.JSONField(
+        default=list, validators=[validate_service_types], verbose_name="服务项目",
     )
     priority = models.CharField(
         max_length=10,
@@ -382,6 +373,17 @@ class MaintenanceOrder(MaintenanceChangeLogMixin, WorkflowStateModel):
         settings.AUTH_USER_MODEL, blank=True, related_name="followed_maintenance_orders"
     )
     reserved_groups = models.ManyToManyField("users.Group", through="MaintenanceGroupReservation")
+
+    def clean_fields(self, exclude=None):
+        # Keep service callers that submit the former scalar value compatible.
+        if isinstance(self.service_type, str):
+            self.service_type = [self.service_type] if self.service_type else []
+        super().clean_fields(exclude=exclude)
+
+    def get_service_type_display(self):
+        from .maintenance_materials import service_type_label
+
+        return service_type_label(self.service_type)
 
     class Meta:
         ordering = ("-created", "-pk")
@@ -542,6 +544,7 @@ class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
     order = models.ForeignKey(MaintenanceOrder, on_delete=models.PROTECT, related_name="documents")
     material = models.CharField(max_length=20, choices=DOCUMENT_MATERIALS)
     version = models.PositiveIntegerField()
+    scan_count = models.PositiveBigIntegerField(default=0, editable=False, verbose_name="扫描次数")
     item_number = models.PositiveIntegerField(default=0, editable=False)
     removed_at = models.DateTimeField(null=True, blank=True, editable=False)
     replaces_document = models.ForeignKey(
@@ -558,6 +561,7 @@ class MaintenanceDocument(MaintenanceChangeLogMixin, ChangeLoggedModel):
                  ("billing", "结算费用明细")),
     )
     form_data = models.JSONField(default=dict, blank=True)
+    electronic_seal = models.JSONField(default=dict, blank=True, editable=False)
     billing_data = models.JSONField(
         default=dict, blank=True, editable=False, verbose_name="计费明细"
     )
@@ -650,7 +654,6 @@ class MaintenanceEvent(ChangeLoggedModel):
         "return": "批转流程",
         "transfer": "批转流程",
         "countersign": "批转流程",
-        "view": "打开流程（查阅流程）",
         "form": "保存表单",
         "edit": "保存表单",
         "save": "保存表单",

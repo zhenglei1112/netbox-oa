@@ -95,16 +95,16 @@ test('standalone pages load the installed NetBox JavaScript and then show queued
 test('missing service effect identifies the required field instead of a generic browser message', () => {
   const app = setup();
   app.events.invalid({preventDefault() {}, target: {
-    validity: {valueMissing: true}, dataset: {requiredMessage: '请选择服务效果。'},
+    validity: {valueMissing: true}, dataset: {requiredMessage: '请选择验收结果。'},
     validationMessage: '请在列表中选择一项。',
   }});
-  assert.equal(app.shown[0].children[1].textContent, '请选择服务效果。');
+  assert.equal(app.shown[0].children[1].textContent, '请选择验收结果。');
 });
 
 test('custom required prompts do not hide other validation errors', () => {
   const app = setup();
   app.events.invalid({preventDefault() {}, target: {
-    validity: {valueMissing: false}, dataset: {requiredMessage: '请选择服务效果。'},
+    validity: {valueMissing: false}, dataset: {requiredMessage: '请选择验收结果。'},
     validationMessage: '请选择有效选项。',
   }});
   assert.equal(app.shown[0].children[1].textContent, '请选择有效选项。');

@@ -25,16 +25,16 @@
   <div class="row">
     {% for role in roles %}<div class="col-md-4 mb-2"><strong>{{ role.name }}</strong>：{% if role.group %}{{ role.group.name }}{% elif policy %}<span class="text-warning">未配置</span>{% else %}<span class="text-muted">选择配置后查看</span>{% endif %}</div>{% endfor %}
     <div class="col-md-4 mb-2"><strong>线路主管</strong>：每张工单指定的负责人，办理最后的付款申请登记</div>
-    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、验收申请、两个用印后材料上传环节、生成付款</div>
+    <div class="col-md-4 mb-2"><strong>发起人</strong>：创建该工单的用户，办理草稿签名与提交、工单修正、验收申请、生成付款</div>
   </div>
 </div></details>
 <details class="card mb-3"><summary class="card-header">查看审批与材料规则</summary><div class="card-body">
   <ul class="mb-0">
     <li>发起人不能审批自己发起的工单，包括加签和管理员代办；须由其他有权限的审批人办理。用户组成员还须具有相应的工单查看和任务办理权限。</li>
     <li>工单复核、工单部门审核、验收申请、验收复核、验收部门审核须完成本人手写签名后批转；工单公司审批和验收公司审批无需签名。验收复核使用复核人用户组。</li>
-    <li>维护服务工单和工单验收单各一份，修订保存新版本；服务报告和服务结算单允许多份，上传时明确新增或更新，更新保留份号和历史版本。</li>
+    <li>维护服务工单和工单服务验收单各一份，修订保存新版本；服务报告和服务结算单允许多份，上传时明确新增或更新，更新保留份号和历史版本。</li>
     <li>覆盖保留历史版本；删除须有材料删除权限，删除后旧版本不计入当前材料。</li>
-    <li>只有维护服务工单和工单验收单办理用印，用印件须关联本次审批的具体表单版本；审批原件、用印件和历史版本均可按权限查阅。</li>
+    <li>维护服务工单和工单服务验收单仅保留电子件，公司审批通过后自动在获批版本加盖电子公章和审批日期；修订版本须重新审批，历史版本按权限查阅。</li>
     <li>生成付款和付款部门审核时核对合同付款信息；最后登记外部付款申请单号。</li>
   </ul>
 </div></details>

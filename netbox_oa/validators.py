@@ -1,6 +1,17 @@
 from django.core.exceptions import ValidationError
 
 
+def validate_service_types(value):
+    from .maintenance_materials import SERVICE_ITEMS
+
+    if not isinstance(value, list) or not value:
+        raise ValidationError("请至少选择一个服务项目。")
+    if any(not isinstance(item, str) or item not in dict(SERVICE_ITEMS) for item in value):
+        raise ValidationError("请选择有效的服务项目。")
+    if len(value) != len(set(value)):
+        raise ValidationError("服务项目不能重复。")
+
+
 def validate_steps(value):
     """A workflow contains one or more ordered group approval steps."""
     if not isinstance(value, list) or not value:

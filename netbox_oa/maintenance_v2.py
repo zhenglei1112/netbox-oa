@@ -38,25 +38,25 @@ def handling_guide(detail):
             ]
         elif key == "acceptance_apply":
             title = "填写验收单并上传验收附件"
-            steps = ["填写工单验收单，选择服务效果并填写结算金额。",
+            steps = ["填写工单服务验收单，选择验收结果并填写结算金额。",
                      "上传服务报告、服务结算单扫描件；这两类附件无需用印。",
                      "完成本人手写签名后提交，修改验收单后须重新签名。"]
             tone = "submission"
         elif key in ACCEPTANCE_SIGNING_NODES:
             title = "核对验收材料，完成本环节手写签名"
-            steps = ["核对工单验收单、服务报告和服务结算单。",
+            steps = ["核对工单服务验收单、服务报告和服务结算单。",
                      "通过手机手写签名后同意；签名日期由系统记录，有问题可退回验收申请。"]
         elif key == "payment_plan":
-            title = "核对用印验收单，完善合同付款信息"
+            title = "核对电子验收单，完善合同付款信息"
             steps = [
-                "核对本次验收单用印扫描件及服务结算单。",
+                "核对本次电子盖章验收单及服务结算单。",
                 "进入付款信息完善合同付款信息，上传付款通知书和电子发票后提交部门审核。",
             ]
             tone = "payment"
         elif key == "payment_review":
             title = "核对结算依据与付款信息，完成付款审核"
             steps = [
-                "比对用印验收单、服务结算单、付款通知书、电子发票及合同付款信息。",
+                "比对电子盖章验收单、服务结算单、付款通知书、电子发票及合同付款信息。",
                 "核对无误后同意；需调整时退回生成付款环节。",
             ]
             tone = "payment"
@@ -66,13 +66,6 @@ def handling_guide(detail):
                 "确认外部付款流程已通过，填写外部流程编号后登记。",
             ]
             tone = "payment"
-        elif key.endswith("_sealed_upload"):
-            title = "上传用印后材料，核对后提交"
-            steps = [
-                "由发起流程的线路主管逐份关联审批原件上传用印件。",
-                "核对用印内容、页数及签章，全部补齐后提交。",
-            ]
-            tone = "submission"
         elif kind == "submission":
             title = "上传本次审批材料，核对后提交"
             steps = [
@@ -81,13 +74,6 @@ def handling_guide(detail):
                 "退回补正后须按本次要求更新材料，再提交审批。",
             ]
             tone = "submission"
-        elif kind == "action" and key.endswith("_seal"):
-            title = "按审批内容完成用印"
-            steps = [
-                "查阅本次审批通过的工单表单或扫描件，按审批内容办理用印。",
-                "确认用印完成后提交，交由发起流程的线路主管上传用印后材料。",
-            ]
-            tone = "seal"
         elif kind in {"approval", "countersign"}:
             title = "逐份审阅本次材料，确认是否同意"
             steps = [

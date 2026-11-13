@@ -145,14 +145,14 @@ class DraftSubmissionTests(TestCase):
         signature = self.start()
         self.assertEqual(self.current().name, "工单复核")
         self.assertEqual(
-            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 14
+            len([n for n in self.order.steps_snapshot if not n.get("return_only")]), 10
         )
         self.assertNotIn("order_fill", [n["key"] for n in self.order.steps_snapshot])
         while self.order.tasks.filter(status="pending").exists():
             self.complete()
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, "completed")
-        self.assertEqual(self.order.tasks.count(), 14)
+        self.assertEqual(self.order.tasks.count(), 10)
         self.assertFalse(self.order.tasks.filter(name="工单修正").exists())
         signature.refresh_from_db()
         self.assertIsNotNone(signature.submitted_at)
@@ -203,6 +203,9 @@ class DraftSubmissionTests(TestCase):
         self.assertEqual(order.tasks.get(status="pending").name, "工单复核")
         self.assertEqual(order.documents.count(), 1)
         self.assertEqual(MaintenanceOrder.objects.count(), 2)
+        self.assertFalse(order.events.filter(action__in=("edit", "save"))
+                         .exclude(details__audit=False).exists())
+        self.assertEqual(order.events.filter(action="start").count(), 1)
         response = self.client.post(
             result["form_action"],
             {**data, "expected_document_id": signature.document_id, "_submit": "1"},
@@ -373,6 +376,9 @@ class DraftSubmissionTests(TestCase):
         self.assertEqual(response.status_code, 302, response.content)
         self.assertEqual(self.current().name, "工单复核")
         self.assertEqual(self.order.documents.filter(kind="form").count(), 2)
+        internal_saves = self.order.events.filter(action__in=("edit", "save"))
+        self.assertEqual(internal_saves.count(), 2)
+        self.assertFalse(internal_saves.exclude(details__audit=False).exists())
         original_print = self.client.get(
             reverse("plugins:netbox_oa:maintenance_print", args=[original.document_id])
         )

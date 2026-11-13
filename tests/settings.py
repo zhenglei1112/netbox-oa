@@ -81,6 +81,13 @@ class PluginTemplateExtension:
         )
 
 
+class PluginMenu:
+    def __init__(self, label, groups, icon_class=None):
+        self.label = label
+        self.groups = groups
+        self.icon_class = icon_class
+
+
 class PluginMenuItem:
     def __init__(self, link, link_text, permissions=None, buttons=None):
         self.link = link
@@ -90,6 +97,7 @@ class PluginMenuItem:
 
 
 plugins.PluginTemplateExtension = PluginTemplateExtension
+plugins.PluginMenu = PluginMenu
 plugins.PluginMenuItem = PluginMenuItem
 sys.modules["netbox"] = netbox
 sys.modules["netbox.plugins"] = plugins

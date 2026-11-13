@@ -8,6 +8,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.urls import reverse
+from django.utils.html import strip_tags
 
 from netbox_oa import maintenance_billing as billing
 from netbox_oa import maintenance_services as services
@@ -44,6 +45,53 @@ def line(**values):
 
 
 class BillingCalculationTests(SimpleTestCase):
+    def test_optional_service_dates_and_legacy_datetimes(self):
+        for dates in ({}, {"started_at": "", "ended_at": ""},
+                      {"started_at": "2026-09-04"}, {"ended_at": "2026-09-04"},
+                      {"started_at": None, "ended_at": None}):
+            for values in ({}, {"rule_key": "services:A3", "tier_index": "1"}):
+                with self.subTest(dates=dates, values=values):
+                    result = billing.calculate(schedule(), [{
+                        "rule_key": "services:B1", "quantity": "1", **values, **dates,
+                    }])
+                    self.assertIn(result["total"], ("12000.00", "200.00"))
+                    self.assertEqual(result["lines"][0]["started_at"],
+                                     dates.get("started_at") or "")
+                    self.assertEqual(result["lines"][0]["ended_at"],
+                                     dates.get("ended_at") or "")
+        result = billing.calculate(schedule(), [line()])
+        self.assertEqual(result["lines"][0]["started_at"], "2026-09-04")
+        self.assertEqual(result["lines"][0]["ended_at"], "2026-09-04")
+        for values in ({"started_at": "invalid"}, {"ended_at": "2026-02-30"},
+                       {"started_at": "2026-09-05", "ended_at": "2026-09-04"},
+                       {"started_at": "2027-01-01", "ended_at": ""},
+                       {"started_at": "", "ended_at": "2025-12-31"}):
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                billing.calculate(schedule(), [line(**values)])
+
+    def test_routine_maintenance_zeroes_only_selected_lines(self):
+        result = billing.calculate(schedule(), [
+            line(routine_maintenance=True, deduction="100"),
+            line(rule_key="services:A3", tier_index="1", routine_maintenance=True),
+            line(rule_key="services:E1", routine_maintenance=True),
+            line(deduction="10"),
+        ], allow_routine_maintenance=True)
+        self.assertEqual([row["net"] for row in result["lines"]],
+                         ["0.00", "0.00", "0.00", "11990.00"])
+        self.assertEqual(result["total"], "11990.00")
+        self.assertEqual(result["lines"][0]["gross"], "12000.00")
+        self.assertTrue(result["lines"][0]["routine_maintenance"])
+        self.assertFalse(result["lines"][-1]["routine_maintenance"])
+        for value in ("true", "false", "0", 0, 1, None):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                billing.calculate(schedule(), [line(routine_maintenance=value)],
+                                  allow_routine_maintenance=True)
+        with self.assertRaisesMessage(ValidationError, "仅代维-日常合同"):
+            billing.calculate(schedule(), [line(routine_maintenance=True)])
+        with self.assertRaises(ValidationError):
+            billing.calculate(schedule(), [line(routine_maintenance=True, quantity="0")],
+                              allow_routine_maintenance=True)
+
     def test_selected_contract_tier_sets_price_and_rejects_invalid_choices(self):
         result = billing.calculate(schedule(), [
             line(rule_key="services:A3", tier_index="0", quantity="2", deduction="10"),
@@ -128,9 +176,94 @@ class SettlementBillingTests(TestCase):
     def save_acceptance(self, **values):
         return services.save_company_form(
             pk=self.order.pk, actor=self.actor, material="acceptance",
-            data={**company_form_initial(self.order), "service_effect": "good",
+            data={**company_form_initial(self.order), "service_effect": "passed",
                   "settlement_amount": "0.01", **values},
         )
+
+    def test_routine_contract_preview_save_reopen_and_acceptance_total(self):
+        original = self.prepare()
+        self.client.force_login(self.actor)
+        url = reverse("plugins:netbox_oa:settlement_billing_edit", args=[original.pk])
+        self.assertContains(self.client.get(url), 'data-routine-maintenance-allowed="0"')
+        data = {"lines": json.dumps([line(routine_maintenance=True), line(deduction="10")])}
+        self.assertEqual(self.client.post(url + "?preview=1", data).status_code, 400)
+        with self.assertRaisesMessage(ValidationError, "仅代维-日常合同"):
+            billing.save_billing(original.pk, self.actor, [line(routine_maintenance=True)])
+        # Eligibility follows the referenced contract, not the order's old snapshot.
+        self.contract_type.name = "代维-日常"
+        self.contract_type.save()
+        for query in ("", "?embed=1"):
+            self.assertContains(self.client.get(url + query),
+                                'data-routine-maintenance-allowed="1"')
+        preview = self.client.post(url + "?preview=1", data)
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["total"], "11990.00")
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        document = billing.billing_documents(self.order).get()
+        self.assertEqual(document.billing_data["lines"][0]["net"], "0.00")
+        edit = reverse("plugins:netbox_oa:settlement_billing_edit", args=[document.pk])
+        self.assertTrue(self.client.get(edit).context["billing_initial"][0]["routine_maintenance"])
+        acceptance = self.save_acceptance()
+        self.assertEqual(acceptance.form_data["settlement_amount"], "11990.00")
+        printed = self.client.get(reverse("plugins:netbox_oa:maintenance_print",
+                                         args=[acceptance.pk]))
+        self.assertContains(printed, '<span class="routine-maintenance-label">日常代维</span>')
+        self.assertNotContains(printed, "（日常代维）")
+        self.assertIn("合计：11990.00", strip_tags(printed.content.decode()))
+        self.assertEqual(self.client.post(edit, {"lines": json.dumps([line()])}).status_code, 302)
+        document.refresh_from_db()
+        self.assertEqual(document.billing_data["total"], "12000.00")
+        self.assertFalse(document.billing_data["lines"][0]["routine_maintenance"])
+        self.contract_type.name = "代维-框架"
+        self.contract_type.save()
+        self.assertContains(self.client.get(edit), 'data-routine-maintenance-allowed="0"')
+        self.assertEqual(self.client.post(edit + "?preview=1", data).status_code, 400)
+
+    def test_optional_service_dates_preview_save_and_reopen(self):
+        original = self.prepare()
+        self.client.force_login(self.actor)
+        url = reverse("plugins:netbox_oa:settlement_billing_edit", args=[original.pk])
+        data = {"lines": json.dumps([line(started_at="", ended_at="")])}
+        preview = self.client.post(url + "?preview=1", data)
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["total"], "12000.00")
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        document = billing.billing_documents(self.order).get()
+        self.assertEqual(document.billing_data["lines"][0]["started_at"], "")
+        self.assertEqual(document.billing_data["lines"][0]["ended_at"], "")
+        edit = reverse("plugins:netbox_oa:settlement_billing_edit", args=[document.pk])
+        reopened = self.client.get(edit).context["billing_initial"][0]
+        self.assertEqual(reopened["started_at"], "")
+        self.assertEqual(reopened["ended_at"], "")
+
+    def test_contract_link_and_refresh_pricing_without_saving(self):
+        original = self.prepare()
+        self.client.force_login(self.actor)
+        url = reverse("plugins:netbox_oa:settlement_billing_edit", args=[original.pk])
+        contract_url = reverse("plugins:netbox_contract:contract", args=[self.contract.pk])
+        for query in ("", "?embed=1"):
+            page = self.client.get(url + query)
+            self.assertContains(page, f'href="{contract_url}" target="_blank"')
+            self.assertContains(page, "维护合同计费</a>")
+            self.assertContains(page, 'type="button" data-billing-refresh')
+            html = page.content.decode()
+            self.assertLess(html.index('data-billing-refresh'), html.index('>取消</a>'))
+        count = self.order.documents.count()
+        self.contract.maintenance_pricing["services"][0]["unit_price"] = "500"
+        self.contract.save()
+        refreshed = self.client.get(url, {"refresh_pricing": "1"})
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual(refreshed.json()["rules"][0]["unit_price"], "500")
+        self.assertEqual(refreshed["Cache-Control"], "no-store")
+        self.assertEqual(self.order.documents.count(), count)
+        original.refresh_from_db()
+        self.assertEqual(original.billing_data, {})
+        self.contract.maintenance_pricing = {}
+        self.contract.save()
+        missing = self.client.get(url, {"refresh_pricing": "1"}).json()
+        self.assertEqual(missing["rules"], [])
+        self.assertIn("尚未配置", missing["pricing_error"])
+        self.assertContains(self.client.get(url), "维护合同计费</a>")
 
     def test_updates_keep_one_record_aggregate_and_ignore_client_totals(self):
         original = self.prepare()
@@ -188,17 +321,19 @@ class SettlementBillingTests(TestCase):
         billing.save_billing(current.pk, self.actor, [line(deduction="10")])
         page = self.client.get(reverse("plugins:netbox_oa:maintenance_print",
                                        args=[acceptance.pk]))
-        self.assertContains(page, "收费明细")
+        self.assertContains(page, "结算明细")
         self.assertContains(page, "48芯以上")
-        self.assertContains(page, "2026-09-04 06:00:00")
-        self.assertContains(page, "2026-09-04 15:30:00")
+        self.assertNotContains(page, "2026-09-04 06:00:00")
+        self.assertNotContains(page, "2026-09-04 15:30:00")
+        for text in ("收费明细", "服务要求", "服务时间"):
+            self.assertNotContains(page, text)
         self.assertContains(page, "服务时长 9小时30分钟")
-        self.assertContains(page, "合计（元）：24220.00")
+        self.assertIn("合计：24220.00", strip_tags(page.content.decode()))
         self.assertNotContains(page, "11990.00")
         html = page.content.decode()
         self.assertEqual(html.count('<table '), 1)
         self.assertContains(page, 'class="document-table acceptance-table"')
-        self.assertLess(html.index('aria-label="收费明细"'),
+        self.assertLess(html.index('aria-label="结算明细"'),
                         html.index('class="applicant-row"'))
 
     def test_acceptance_print_without_fee_snapshot_keeps_original_form(self):
@@ -209,7 +344,7 @@ class SettlementBillingTests(TestCase):
                                        args=[acceptance.pk]))
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "100")
-        self.assertNotContains(page, 'aria-label="收费明细"')
+        self.assertNotContains(page, 'aria-label="结算明细"')
 
     def test_deleted_and_replaced_scans_do_not_restore_old_amounts(self):
         original = self.prepare()
@@ -390,7 +525,7 @@ class SettlementBillingTests(TestCase):
         page = self.client.get(url, {"return_query": query})
         self.assertEqual(page.context["return_query"], query)
         response = self.client.post(url, {
-            **company_form_initial(self.order), "service_effect": "good",
+            **company_form_initial(self.order), "service_effect": "passed",
             "settlement_amount": "0", "return_query": query,
         }, follow=True)
         self.assertEqual(response.status_code, 200)

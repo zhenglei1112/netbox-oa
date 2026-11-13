@@ -11,7 +11,7 @@ function setup(withAmount = true) {
   const amount = {value: '100.00', changes: [], dispatchEvent(event) {this.changes.push(event.type);}};
   const summary = {innerHTML: '<section>原明细</section>'};
   const form = {querySelector: selector => selector === '[data-billing-summary]' ? summary : amount,
-    serviceEffect: 'excellent'};
+    serviceEffect: 'passed'};
   const trigger = {href: '/billing/manage/?return_to=acceptance', dataset: {},
     isConnected: true, closest: () => withAmount ? form : null, focus() {this.focused = true;}};
   const element = tag => {
@@ -95,7 +95,7 @@ test('saving updates the acceptance amount and table while preserving unsubmitte
   assert.equal(page.amount.value, '3800.00');
   assert.equal(page.summary.innerHTML, '<section>新明细</section>');
   assert.deepEqual(page.amount.changes, ['change']);
-  assert.equal(page.form.serviceEffect, 'excellent');
+  assert.equal(page.form.serviceEffect, 'passed');
   assert.equal(page.modals[0].visible, false);
   assert.equal(page.frame().src, 'about:blank');
   assert.equal(page.reloads(), 0);

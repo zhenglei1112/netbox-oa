@@ -2,9 +2,8 @@
 {% include 'netbox_oa/inc/notifications.html' %}
 {% render_errors form %}{{ form.lines }}{{ form.lines.errors }}
 {% if billing_return_query %}<input type="hidden" name="return_to" value="acceptance">{% endif %}
-{% if pricing_error %}<p class="alert alert-warning">{{ pricing_error }}</p>{% endif %}
 {{ rules|json_script:'oa-billing-rules' }}{{ billing_initial|json_script:'oa-billing-initial' }}
-<div data-billing-rows></div>
+<div data-billing-rows data-routine-maintenance-allowed="{{ routine_maintenance_allowed|yesno:'1,0' }}"></div>
 <button class="btn btn-outline-primary mb-3" type="button" data-billing-add><i class="mdi mdi-plus" aria-hidden="true"></i> 添加计费条目</button>
-<p class="fw-bold">本次验收费用合计：<span data-billing-total>—</span> 元 <span class="fw-normal ms-2" data-billing-status role="status" aria-live="polite" hidden></span></p>
-<script src="{% static 'netbox_oa/maintenance-billing.js' %}?v=20261109-7" defer></script>
+<p class="fw-bold">本次验收费用合计：<span data-billing-total>—</span> 元 <span class="fw-normal ms-2" data-billing-status role="status" aria-live="polite" {% if not pricing_error %}hidden{% endif %}>{{ pricing_error }}</span> <a class="fw-normal ms-2" data-billing-contract-link href="{{ billing_contract_url }}" target="_blank" rel="noopener noreferrer" {% if rules %}hidden{% endif %}>维护合同计费</a></p>
+<script src="{% static 'netbox_oa/maintenance-billing.js' %}?v=20261112-6" defer></script>

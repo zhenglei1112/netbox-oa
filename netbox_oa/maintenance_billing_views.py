@@ -90,6 +90,9 @@ class SettlementBillingEditView(LoginRequiredMixin, View):
 
     def get(self, request, pk):
         document = self.document(request, pk)
+        if request.GET.get("refresh_pricing") == "1":
+            return JsonResponse(self.pricing_data(document, request.user),
+                                headers={"Cache-Control": "no-store"})
         form = BillingForm(initial={"lines": document.billing_data.get("lines", [])})
         return self.render_form(request, document, form)
 
@@ -99,9 +102,8 @@ class SettlementBillingEditView(LoginRequiredMixin, View):
         if form.is_valid():
             try:
                 if request.GET.get("preview") == "1":
-                    return JsonResponse(billing.calculate(
-                        billing.schedule_for(document.order, request.user),
-                        form.cleaned_data["lines"],
+                    return JsonResponse(billing.calculate_for_order(
+                        document.order, request.user, form.cleaned_data["lines"],
                     ))
                 if document.pk:
                     saved = billing.save_billing(
@@ -128,13 +130,21 @@ class SettlementBillingEditView(LoginRequiredMixin, View):
             )}, status=400)
         return self.render_form(request, document, form)
 
-    def render_form(self, request, document, form):
+    def pricing_data(self, document, actor):
         error = ""
         try:
-            schedule = billing.schedule_for(document.order, request.user)
+            schedule = billing.schedule_for(document.order, actor)
             rules = list(billing.catalogue(schedule).values())
         except ValidationError as exc:
             rules, error = [], "；".join(exc.messages)
+        return {
+            "rules": rules, "pricing_error": error,
+            "routine_maintenance_allowed": billing.routine_maintenance_allowed(
+                document.order, actor,
+            ),
+        }
+
+    def render_form(self, request, document, form):
         initial = document.billing_data.get("lines", [])
         if form.is_bound:
             try:
@@ -148,7 +158,10 @@ class SettlementBillingEditView(LoginRequiredMixin, View):
                     else "netbox_oa/maintenance/settlement_billing_edit.html")
         return render(request, template, {
             "form": form, "document": document, "object": document.order,
-            "rules": rules, "billing_initial": initial, "pricing_error": error,
+            **self.pricing_data(document, request.user), "billing_initial": initial,
+            "billing_contract_url": reverse(
+                "plugins:netbox_contract:contract", args=[document.order.contract_id],
+            ),
             "return_url": billing_list_url(request, document.order_id),
             "billing_return_query": billing_return_query(request),
         })

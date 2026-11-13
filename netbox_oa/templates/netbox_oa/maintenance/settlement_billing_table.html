@@ -1,5 +1,5 @@
 <div class="table-responsive"><table class="table table-hover">
-  <thead><tr><th>序号</th><th>服务项目</th><th>服务时间</th><th>计费依据</th><th>数量</th><th>服务价格（元）</th><th>扣费金额（元）</th><th>结算价格（元）</th></tr></thead>
-  <tbody>{% for line in billing.lines %}<tr><td>{{ forloop.counter }}</td><td>{{ line.name }}</td><td class="text-nowrap">{{ line.started_at|slice:":10" }}<br>{{ line.ended_at|slice:":10" }}</td><td>{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %}<br>单价 {{ line.unit_price }} 元</td><td class="text-nowrap">{{ line.quantity }} {{ line.unit }}</td><td>{{ line.gross }}</td><td>{{ line.deduction }}</td><td>{{ line.net }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th>序号</th><th>服务项目</th><th>服务日期</th><th>计费依据</th><th>数量</th><th>服务价格（元）</th><th>扣费金额（元）</th><th>结算价格（元）</th></tr></thead>
+  <tbody>{% for line in billing.lines %}<tr><td>{{ forloop.counter }}</td><td>{{ line.name }}{% if line.routine_maintenance %}（日常代维）{% endif %}</td><td class="text-nowrap">{{ line.started_at|slice:":10"|default:"—" }}<br>{{ line.ended_at|slice:":10"|default:"—" }}</td><td>{{ line.method_label }}{% if line.tier %} · {{ line.tier.label }}{% endif %}<br>单价 {{ line.unit_price }} 元</td><td class="text-nowrap">{{ line.quantity }} {{ line.unit }}</td><td>{{ line.gross }}</td><td>{{ line.deduction }}</td><td>{{ line.net }}</td></tr>{% endfor %}</tbody>
   <tfoot><tr><th colspan="7">合计（元）</th><td>{{ billing.total }}</td></tr></tfoot>
 </table></div>

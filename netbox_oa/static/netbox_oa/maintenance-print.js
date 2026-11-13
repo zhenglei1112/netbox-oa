@@ -30,14 +30,17 @@
   button?.addEventListener('click', async () => {
     clear();
     button.disabled = true;
-    let errorText = '打印码加载失败，请重新点击打印。';
+    let errorText = '印章、签名或打印码加载失败，请重新点击打印。';
     try {
       for (const template of document.querySelectorAll('.print-code-template')) {
         const code = template.content.firstElementChild.cloneNode(true);
         template.before(code);
         codes.push(code);
       }
-      await Promise.all(codes.flatMap(code => [...code.querySelectorAll('img')])
+      await Promise.all([
+        ...codes.flatMap(code => [...code.querySelectorAll('img')]),
+        ...document.querySelectorAll('.electronic-seal, .handwritten-signature'),
+      ]
         .map(image => image.decode()));
       errorText = '打印操作记录保存失败，请检查登录状态后重试。';
       await recordPrint();

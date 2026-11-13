@@ -25,7 +25,7 @@ def print_codes(number, verification_url):
     # scales the bars and their human-readable number together.
     svg = ElementTree.fromstring(barcode)
     width = float(svg.attrib["width"].removesuffix("mm"))
-    svg.set("height", "13mm")
+    svg.set("height", "14.5mm")
     caption = f"*{number}*"
     caption_width = (width - 6) * 0.92
     start = (width - caption_width) / 2
@@ -34,10 +34,10 @@ def print_codes(number, verification_url):
             f"{start + index * caption_width / (len(caption) - 1):.3f}mm"
             for index in range(len(caption))
         ),
-        "y": "11.25mm",
+        "y": "12.25mm",
         "text-anchor": "middle",
-        "font-family": "Consolas, 'Liberation Mono', monospace",
-        "font-size": "9pt",
+        "font-family": "Times New Roman, serif",
+        "font-size": "12pt",
         "fill": "black",
     })
     text.text = caption

@@ -9,6 +9,10 @@ from .models import MaintenanceDocument, MaintenanceOrder
 class ContractOrderTable(NetBoxTable):
     number = tables.Column(verbose_name="工单编号", linkify=False)
     service_type = tables.Column(verbose_name="服务类型")
+
+    def render_service_type(self, record):
+        return record.get_service_type_display()
+
     requester = tables.Column(verbose_name="发起人", linkify=False)
     status = tables.Column(verbose_name="状态")
     stage = tables.Column(verbose_name="当前阶段")
@@ -20,7 +24,7 @@ class ContractOrderTable(NetBoxTable):
             '{{ record.acceptance_form_data.settlement_amount|floatformat:"2g" }}'
             '{% else %}—{% endif %}'
         ),
-        verbose_name="验收单支付金额（元）", orderable=False, empty_values=(),
+        verbose_name="结算金额（元）", orderable=False, empty_values=(),
         attrs={"td": {"class": "text-start text-nowrap"}},
     )
     payment_progress = tables.TemplateColumn(

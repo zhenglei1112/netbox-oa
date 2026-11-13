@@ -1,15 +1,52 @@
 {% load static %}
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="oa-verification-page">
 <head>
-{% include 'netbox_oa/inc/notifications.html' %}<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>工单核验 · {{ order.number }}</title><script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
-<link rel="stylesheet" href="{% static 'netbox-external.css' %}">
-<link rel="stylesheet" href="{% static 'netbox.css' %}">
-<link rel="stylesheet" href="{% static 'netbox_oa/maintenance-verify.css' %}"></head>
-<body><main>
-  <header><p>工单信息核验</p><h1>{{ order.number }}</h1><span class="status">{{ order.get_status_display }}</span></header>
-  <section><h2>{{ document.get_material_display }}</h2><dl><dt>表单版本</dt><dd>v{{ document.version }}{% if not is_latest %}（已有更新版本，请核对）{% endif %}</dd><dt>生成时间</dt><dd>{{ document.created|date:'Y-m-d H:i:s' }}</dd><dt>服务项目</dt><dd>{{ service_type_label }}</dd><dt>服务单位</dt><dd>{{ data.supplier }}</dd><dt>合同编号</dt><dd>{{ data.contract_number }}</dd><dt>服务省市</dt><dd>{{ data.service_region }}</dd><dt>服务位置</dt><dd>{{ data.service_location }}</dd><dt>服务要求</dt><dd>{{ data.requirements|linebreaksbr }}</dd>{% if document.material == "acceptance" %}<dt>服务效果</dt><dd>{{ service_effect_label }}</dd><dt>结算金额（元）</dt><dd>{{ data.settlement_amount }}</dd>{% endif %}</dl></section>
-  <section><h2>办理与付款申请</h2><dl><dt>发起人</dt><dd>{{ order.requester.get_full_name|default:order.requester.username }}</dd><dt>草稿创建</dt><dd>{{ order.created|date:'Y-m-d H:i:s' }}</dd><dt>提交审批</dt><dd>{% if order.status == 'draft' %}未提交{% else %}{{ summary.initiated_at|date:'Y-m-d H:i:s'|default:'暂无可查看记录' }}{% endif %}</dd><dt>当前阶段</dt><dd>{{ order.get_stage_display }}{% if summary.current %} · {{ summary.current.name }}{% endif %}</dd><dt>工单完成</dt><dd>{{ order.completed_at|date:'Y-m-d H:i:s'|default:'未完成' }}</dd><dt>付款状态</dt><dd>{{ order.get_payment_status_display }}</dd><dt>付款申请提交</dt><dd>{{ payment_task.completed_at|date:'Y-m-d H:i:s'|default:'暂无可查看的提交记录' }}</dd>{% if payment_task.external_reference %}<dt>外部申请单号</dt><dd>{{ payment_task.external_reference }}</dd>{% endif %}</dl>{% if payment_contract_url %}<a class="btn btn-ghost-primary" href="{{ payment_contract_url }}">合同付款信息</a>{% else %}<p class="note" data-oa-notice="warning">{{ payment_contract_error }}</p>{% endif %}</section>
-  <section><h2>办理记录</h2><ol>{% for item in history.events %}<li><strong>{{ item.short_label }}{% if item.event.task %} · {{ item.event.task.name }}{% endif %}</strong><time>{{ item.event.created|date:'Y-m-d H:i:s' }}</time><span>{{ item.actor_name }}</span>{% if item.event.details.comment %}<p>{{ item.event.details.comment|linebreaksbr }}</p>{% endif %}</li>{% empty %}<li>暂无可查看的办理记录</li>{% endfor %}</ol>{% if history.has_earlier_events %}<p class="note">此处展示最近 100 条可查看记录，完整经过请进入工单。</p>{% endif %}</section>
-  <a class="btn btn-ghost-primary" href="{{ order.get_absolute_url }}">进入工单</a>
-</main></body></html>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>单据校验 · {{ number }}</title>
+  <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-verify.css' %}?v=20261112-1">
+</head>
+<body>
+  <header class="verify-bar">单据校验</header>
+  <main class="verify-main">
+    <article class="verify-paper" aria-label="{{ material_label }}校验信息">
+      <header class="verify-heading">
+        <p class="verify-success"><span aria-hidden="true">✓</span> 来源已核验</p>
+        <h1>{{ material_label }}</h1>
+        <p class="verify-number" aria-label="工单号 {{ number }}">{{ number }}</p>
+        <p class="verify-scans">已被扫描 <strong>{{ scan_count }}</strong> 次</p>
+        {% if not is_latest %}<p class="verify-warning">此单据已有更新版本，以下为扫描版本信息。</p>{% endif %}
+      </header>
+      <section class="verify-progress" aria-labelledby="verify-stage-heading">
+        <div class="verify-section-heading">
+          <h2 id="verify-stage-heading">办理阶段</h2>
+          <span class="verify-status{% if inactive %} verify-status-inactive{% endif %}">{{ status_label }}</span>
+        </div>
+        <ol class="verify-steps" aria-label="当前状态：{{ status_label }}">
+          {% for phase in phases %}
+          <li class="{% if phase.done %}is-done{% endif %}{% if phase.current %} is-current{% endif %}"{% if phase.current %} aria-current="step"{% endif %}>
+            <span class="verify-dot" aria-hidden="true">{% if phase.done %}✓{% else %}{{ phase.number }}{% endif %}</span>
+            <span>{{ phase.label }}</span>
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      <dl class="verify-fields">
+        <dt>提交人</dt><dd>{{ submitter }}</dd>
+        <dt>公司名称</dt><dd>{{ company_name }}</dd>
+        <dt>提交时间</dt><dd>{% if submitted_at %}<time datetime="{{ submitted_at|date:'c' }}">{{ submitted_at|date:'Y-m-d H:i' }}</time>{% else %}未提交{% endif %}</dd>
+        <dt>省份</dt><dd>{{ province }}</dd>
+        <dt>位置</dt><dd>{{ location }}</dd>
+        {% if acceptance_result %}<dt>验收结果</dt><dd>{{ acceptance_result }}</dd>{% endif %}
+      </dl>
+      <section class="verify-requirements" aria-labelledby="verify-requirements-heading">
+        <h2 id="verify-requirements-heading">服务要求</h2>
+        <p>{{ requirements|linebreaksbr }}</p>
+      </section>
+    </article>
+  </main>
+</body>
+</html>

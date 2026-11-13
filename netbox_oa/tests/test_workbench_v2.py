@@ -145,7 +145,7 @@ class WorkbenchV2Tests(TestCase):
             if key == "payment_eip":
                 self.assertContains(response, 'name="external_reference"')
             self.complete()
-        self.assertEqual(len(seen), 14)
+        self.assertEqual(len(seen), 10)
         response = self.page()
         self.assertNotContains(response, 'class="oa-actions"')
         self.assertContains(response, "工单资料库")

@@ -1,10 +1,13 @@
 
 """Order sealing uses the reviewed form without a pre-seal scan submission."""
 
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from netbox_oa import maintenance_services as services
 from netbox_oa.maintenance_flow import build_steps
@@ -32,15 +35,11 @@ class ServiceOrderTests(TestCase):
         ) if node["stage"] == "ordering"]
         self.assertEqual([node["key"] for node in nodes], [
             "order_correction", "order_review", "order_final", "order_senior_seal",
-            "order_seal", "order_sealed_upload",
         ])
-        self.assertEqual([node["role"] for node in nodes[-3:]], [
-            "senior", "seal", "requester",
-        ])
-        self.assertEqual([node["group_id"] for node in nodes[-3:]], [3, 4, None])
-        self.assertEqual(nodes[3]["return_to"], "order_correction")
-        for node in nodes[3:5]:
-            self.assertEqual(node["required"], [("order", "electronic")])
+        self.assertEqual(nodes[-1]["role"], "senior")
+        self.assertEqual(nodes[-1]["group_id"], 3)
+        self.assertEqual(nodes[-1]["return_to"], "order_correction")
+        self.assertEqual(nodes[-1]["required"], [("order", "electronic")])
 
     def test_approve_and_seal_form_without_uploading_pre_seal_scan(self):
         self.reach_company_approval()
@@ -51,26 +50,57 @@ class ServiceOrderTests(TestCase):
         upload_url = reverse("plugins:netbox_oa:maintenance_material_upload",
                              args=[self.order.pk, "order"])
         self.assertEqual(self.client.get(upload_url).status_code, 403)
-        with self.assertRaisesMessage(ValidationError, "无需上传用印前扫描件"):
+        with self.assertRaisesMessage(ValidationError, "仅保留系统电子件"):
             self.upload("order", "scan")
-        for name in ("工单公司审批", "服务工单用印"):
-            self.assertEqual(self.current().name, name)
-            task = self.complete()
-            self.assertEqual(task.evidence["order"], [form.pk])
-        self.assertEqual(self.current().name, "上传用印后服务工单")
-        self.assertEqual(self.current().assigned_user_id, self.order.requester_id)
-        with self.assertRaisesMessage(ValidationError, "用印扫描件"):
-            services.complete_task(pk=self.current().pk, actor=acting_user(self))
-        self.assertContains(self.client.get(upload_url), "用印后")
-        stamped = self.upload("order", "scan", sealed=True)
-        self.assertEqual(stamped.source_document_id, form.pk)
-        self.assertTrue(stamped.is_sealed)
+        self.assertFalse(form.electronic_seal)
         task = self.complete()
-        self.assertEqual(task.evidence["order"], [stamped.pk])
+        form.refresh_from_db()
+        self.assertEqual(task.evidence["order"], form.pk)
         self.assertEqual(self.current().name, "验收申请")
-        self.assertEqual(self.client.get(reverse(
-            "plugins:netbox_oa:maintenance_print", args=[form.pk]
-        )).status_code, 200)
+        self.assertEqual(form.electronic_seal["date"], timezone.localdate().isoformat())
+        self.assertEqual(form.electronic_seal["document_id"], form.pk)
+        self.assertEqual(form.electronic_seal["approved_by"], self.approver.pk)
+        self.assertTrue(form.electronic_seal["image"].startswith("data:image/png;base64,"))
+        printed = self.client.get(reverse("plugins:netbox_oa:maintenance_print", args=[form.pk]))
+        self.assertContains(printed, 'class="electronic-seal"')
+        self.assertNotContains(self.client.get(self.order.get_absolute_url()), "用印后")
+        self.assertFalse(self.order.documents.filter(kind="scan").exists())
+
+    def test_missing_seal_rolls_back_company_approval(self):
+        self.reach_company_approval()
+        task = self.current()
+        with patch("netbox_oa.maintenance_seals.files", side_effect=OSError("missing")):
+            with self.assertRaisesMessage(ValidationError, "电子印章文件不可用"):
+                self.complete()
+        task.refresh_from_db()
+        self.assertEqual(task.status, "pending")
+        self.assertEqual(self.current().pk, task.pk)
+        self.assertFalse(self.order.documents.get(material="order").electronic_seal)
+
+    def test_company_countersign_must_finish_before_stamp(self):
+        self.reach_company_approval()
+        services.countersign_task(
+            pk=self.current().pk, actor=self.approver, user_id=self.approver.pk,
+            comment="追加公司审核",
+        )
+        self.complete()
+        document = self.order.documents.get(material="order")
+        self.assertFalse(document.electronic_seal)
+        self.assertEqual(self.current().kind, "countersign")
+        self.complete()
+        document.refresh_from_db()
+        self.assertTrue(document.electronic_seal)
+        self.assertEqual(self.current().name, "验收申请")
+
+    def test_payment_requires_approved_electronic_acceptance(self):
+        self.reach_company_approval()
+        while self.current().name != "生成付款":
+            self.complete()
+        document = self.order.documents.get(material="acceptance")
+        document.electronic_seal = {}
+        document.save(update_fields=["electronic_seal"])
+        with self.assertRaisesMessage(ValidationError, "请先完成公司审批"):
+            self.complete()
 
     def test_company_return_revises_form_and_repeats_order_reviews(self):
         self.reach_company_approval()
@@ -87,15 +117,12 @@ class ServiceOrderTests(TestCase):
             self.complete()
         self.assertEqual(self.current().name, "工单公司审批")
         self.assertNotEqual(original.pk, revised.pk)
-        self.assertEqual(self.complete().evidence["order"], [revised.pk])
-        self.complete()
-        with self.assertRaisesMessage(ValidationError, "必须对应本次审批"):
-            services.upload_document(
-                pk=self.order.pk, actor=self.actor, material="order", state="scan",
-                source_document_id=original.pk,
-                file=SimpleUploadedFile("wrong.pdf", b"scan"),
-            )
-        self.assertEqual(self.upload("order", "scan", sealed=True).source_document_id, revised.pk)
+        self.assertEqual(self.complete().evidence["order"], revised.pk)
+        original.refresh_from_db()
+        revised.refresh_from_db()
+        self.assertFalse(original.electronic_seal)
+        self.assertTrue(revised.electronic_seal)
+        self.assertEqual(self.current().name, "验收申请")
 
     def test_batch_endpoint_rejects_pre_seal_order_scans(self):
         self.reach_company_approval()
