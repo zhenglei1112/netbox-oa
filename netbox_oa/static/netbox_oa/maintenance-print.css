@@ -53,8 +53,8 @@
 .order-sheet .seal-date { text-align: left; white-space: nowrap; }
 .order-sheet .seal-stamp-line { position: relative; display: flex; align-items: center; }
 .order-sheet .seal-stamp-line > strong { flex: none; white-space: nowrap; }
-/* Keep the 42mm A4 seal independent of the narrow label and responsive image limits. */
-.order-sheet .electronic-seal { position: absolute; z-index: 0; left: calc(100% - 1mm); top: 50%; transform: translateY(-50%); display: block; width: 42mm; height: 42mm; max-width: none; max-height: none; object-fit: contain; print-color-adjust: exact; }
+/* Match the reference paper stamp with a 47mm seal, independent of responsive image limits. */
+.order-sheet .electronic-seal { position: absolute; z-index: 0; left: calc(100% - 1mm); top: 50%; transform: translateY(-50%); display: block; width: 47mm; height: 47mm; max-width: none; max-height: none; object-fit: contain; print-color-adjust: exact; }
 .order-machine-code { display: flex; justify-content: flex-end; margin-bottom: 3mm; }
 .order-machine-code img { display: block; width: 100%; height: auto; }
 .verification-code { position: absolute; right: 6mm; bottom: 5mm; display: flex; flex-direction: column; align-items: center; color: #000; text-decoration: none; font: 8pt/1.3 "SimHei", sans-serif; }

@@ -350,6 +350,7 @@ def presentation(
         ),
         "payment_contract_stage": payment_contract_stage,
         "payment_application": node.get("key") == "payment_eip",
+        "company_approval": node.get("key") in {"order_senior_seal", "acceptance_company"},
         "can_mobile_sign": bool(
             summary["can_act"]
             and summary["current"]
