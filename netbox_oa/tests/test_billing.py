@@ -322,16 +322,21 @@ class SettlementBillingTests(TestCase):
         page = self.client.get(reverse("plugins:netbox_oa:maintenance_print",
                                        args=[acceptance.pk]))
         self.assertContains(page, "结算明细")
-        self.assertContains(page, "48芯以上")
+        self.assertNotContains(page, "48芯以上")
+        self.assertContains(page, "计费单价")
+        self.assertContains(page, "小计")
+        self.assertContains(page, "服务时间")
+        self.assertContains(page, "2026年9月4日")
+        self.assertNotContains(page, "固定单价")
         self.assertNotContains(page, "2026-09-04 06:00:00")
         self.assertNotContains(page, "2026-09-04 15:30:00")
-        for text in ("收费明细", "服务要求", "服务时间"):
+        for text in ("收费明细", "服务要求"):
             self.assertNotContains(page, text)
-        self.assertContains(page, "服务时长 9小时30分钟")
+        self.assertNotContains(page, "服务时长")
         self.assertIn("合计：24220.00", strip_tags(page.content.decode()))
         self.assertNotContains(page, "11990.00")
         html = page.content.decode()
-        self.assertEqual(html.count('<table '), 1)
+        self.assertEqual(html.count('<table '), 2)
         self.assertContains(page, 'class="document-table acceptance-table"')
         self.assertLess(html.index('aria-label="结算明细"'),
                         html.index('class="applicant-row"'))
@@ -394,7 +399,7 @@ class SettlementBillingTests(TestCase):
         self.assertTrue(page.context["can_add_billing"])
         self.assertContains(page, "维护计费明细")
         self.assertNotContains(page, "新增费用明细")
-        self.assertNotContains(page, "请先在验收申请环节上传服务结算单")
+        self.assertNotContains(page, "请先在验收申请环节上传服务验收申请单")
         self.assertTemplateUsed(self.client.get(create), "generic/object_edit.html")
         count = self.order.documents.count()
         data = {"lines": json.dumps([line()])}
@@ -507,7 +512,7 @@ class SettlementBillingTests(TestCase):
         self.assertContains(saved, 'oa-billing-summary-result')
         summary_html = saved.context["summary_html"]
         self.assertIn('11900.00', summary_html)
-        self.assertIn('2026-09-04', summary_html)
+        self.assertIn('2026年9月4日', summary_html)
         self.assertNotIn('T06:00', summary_html)
         acceptance = reverse("plugins:netbox_oa:maintenance_company_form",
                              args=[self.order.pk, "acceptance"])

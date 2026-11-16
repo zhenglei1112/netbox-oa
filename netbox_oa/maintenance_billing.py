@@ -208,7 +208,7 @@ def calculate(schedule, lines, *, allow_routine_maintenance=False):
                 raise ValidationError("金额超出允许范围。")
             gross = (unit_price * quantity).quantize(CENT, rounding=ROUND_HALF_UP)
             if gross > LIMIT or deduction > gross:
-                raise ValidationError("金额超出范围，或扣费金额大于服务价格。")
+                raise ValidationError("金额超出范围，或扣费金额大于小计。")
             net = Decimal(0) if routine else gross - deduction
             total += net
             if total > LIMIT:
@@ -246,7 +246,7 @@ def summary(order, *, require_complete=False):
     for doc in documents:
         if not doc.billing_data:
             if require_complete:
-                raise ValidationError(f"请先维护服务结算单第{doc.item_number}份的计费明细。")
+                raise ValidationError(f"请先维护服务验收申请单第{doc.item_number}份的计费明细。")
             continue
         total += number(doc.billing_data.get("total"), "结算单汇总金额")
         snapshots.append({"document_id": doc.pk, "item_number": doc.item_number,
@@ -324,7 +324,7 @@ def _save_billing(original, actor, lines):
     _save(document)
     _allowed(MaintenanceDocument, actor, "add", document.pk)
     _begin_task(task, actor)
-    _event(order, actor, "edit", "维护服务结算单计费明细", task,
+    _event(order, actor, "edit", "维护服务验收申请单计费明细", task,
            document_id=document.pk,
            item_number=document.item_number, total=data["total"])
     return document

@@ -370,10 +370,10 @@ class MaintenanceCompanyForm(ContractFieldsMixin, StyledForm, forms.Form):
                     self.fields[name].disabled = True
                     self.initial[name] = value
             self.fields["service_effect"] = forms.ChoiceField(
-                label="验收结果", choices=(("", "请选择"), *SERVICE_EFFECTS),
-                error_messages={"required": "请选择验收结果。",
-                                "invalid_choice": "请选择有效的验收结果。"},
-                widget=forms.Select(attrs={"data-required-message": "请选择验收结果。"}),
+                label="验收结论", choices=(("", "请选择"), *SERVICE_EFFECTS),
+                error_messages={"required": "请选择验收结论。",
+                                "invalid_choice": "请选择有效的验收结论。"},
+                widget=forms.Select(attrs={"data-required-message": "请选择验收结论。"}),
             )
             self.fields["settlement_amount"] = forms.DecimalField(
                 label="结算金额（元）", max_digits=14, decimal_places=2, min_value=0,

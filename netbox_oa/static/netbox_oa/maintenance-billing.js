@@ -25,7 +25,7 @@
     clearTimeout(timer);
     total.textContent = '—';
     for (const row of container.children) {
-      row.querySelector('[data-billing-price]').textContent = '服务价格：—；结算价格：—';
+      row.querySelector('[data-billing-price]').textContent = '小计：—；结算价格：—';
     }
     status.textContent = '正在核算…';
     status.hidden = false;
@@ -45,7 +45,7 @@
       data.lines.forEach((line, index) => {
         const unitPrice = line.rule?.method === 'fixed' ? '' : `核算单价：${line.unit_price} 元；`;
         container.children[index].querySelector('[data-billing-price]').textContent =
-          `${unitPrice}服务价格：${line.gross} 元；扣费：${line.deduction} 元；结算价格：${line.net} 元`;
+          `${unitPrice}小计：${line.gross} 元；扣费：${line.deduction} 元；结算价格：${line.net} 元`;
       });
       total.textContent = data.total;
       status.textContent = '';

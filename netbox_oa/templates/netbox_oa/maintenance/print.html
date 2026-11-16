@@ -7,11 +7,11 @@
   <script src="{% static 'netbox_oa/maintenance-theme.js' %}"></script>
   <link rel="stylesheet" href="{% static 'netbox-external.css' %}">
   <link rel="stylesheet" href="{% static 'netbox.css' %}">
-  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261113-5">
-  <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261111-1" defer></script>
+  <link rel="stylesheet" href="{% static 'netbox_oa/maintenance-print.css' %}?v=20261116-3">
+  <script src="{% static 'netbox_oa/maintenance-print.js' %}?v=20261116-1" defer></script>
 </head>
 <body data-audit-url="{% url 'plugins:netbox_oa:maintenance_print_event' pk=document.pk %}" data-csrf-token="{{ csrf_token }}">
-{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><a class="btn btn-ghost-secondary" href="{{ print_return_url|default:document.order.get_absolute_url }}">返回工单</a></nav>{% endif %}
+{% if not request.GET.embed %}<nav class="print-toolbar" aria-label="打印操作"><button class="btn btn-ghost-primary" id="print-document" type="button">打印 / 另存为 PDF</button><button class="btn btn-ghost-secondary" id="close-print-window" type="button">关闭</button></nav>{% endif %}
 <main class="print-sheet {% if document.material == 'report' %}report-sheet{% else %}order-sheet{% endif %}">
   {% if document.material == 'order' %}
     <h1>中交信通光缆及相关机房环境设备<br>维护服务工单</h1>

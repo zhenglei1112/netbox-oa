@@ -1,5 +1,4 @@
 {% with review_key=material.review_key|default:material.key %}
-{% if material.key == 'settlement' %}<a class="btn btn-ghost-primary" title="计费明细" aria-label="计费明细" href="{% url 'plugins:netbox_oa:settlement_billing_list' pk=detail.order.pk %}"><i class="mdi mdi-calculator" aria-hidden="true"></i></a>{% endif %}
 {% if detail.order.status == 'draft' and material.key == 'order' and material.requires_filling %}
   {% if detail.can_change %}
     <a class="btn btn-ghost-warning" title="编辑" aria-label="编辑" href="{% url 'plugins:netbox_oa:maintenanceorder_edit' pk=detail.order.pk %}?return_query={{ return_query|urlencode }}"><i class="mdi mdi-pencil" aria-hidden="true"></i></a>

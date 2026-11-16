@@ -36,7 +36,6 @@
               <i class="mdi {{ entry.icon }}" aria-hidden="true"></i>
             </a>
             {% endwith %}{% endfor %}
-            {% if group.key == 'settlement' %}<a class="btn btn-ghost-primary" title="计费明细" aria-label="查看工单计费明细" href="{% url 'plugins:netbox_oa:settlement_billing_list' pk=order.pk %}" target="_top"><i class="mdi mdi-calculator" aria-hidden="true"></i></a>{% endif %}
             {% if row.maintenance_document %}
             <details class="material-maintenance">
               <summary class="btn btn-ghost-primary" title="维护{{ row.label }}" aria-label="维护{{ group.name }} {{ row.label }}"><i class="mdi mdi-dots-vertical" aria-hidden="true"></i></summary>

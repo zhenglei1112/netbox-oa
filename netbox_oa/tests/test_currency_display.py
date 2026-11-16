@@ -27,7 +27,7 @@ class CurrencyDisplayTests(SimpleTestCase):
         })
         self.assertIn("￥2,200.00", html)
         self.assertNotIn("贰仟贰佰元整", html)
-        self.assertIn("结算明细（单位：元）", html)
+        self.assertIn('结算明细<span class="billing-unit-label">（单位：元）</span>', html)
         self.assertNotIn("（元）", html)
-        for label in ("序号", "服务价格", "扣费金额", "结算价格"):
+        for label in ("序号", "计费单价", "小计", "扣费金额", "结算价格"):
             self.assertIn(f">{label}</th>", html)

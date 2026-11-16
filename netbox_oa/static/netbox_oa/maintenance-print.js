@@ -1,4 +1,5 @@
 (() => {
+  document.getElementById('close-print-window')?.addEventListener('click', () => window.close());
   const button = document.getElementById('print-document');
   const settings = button?.dataset.auditUrl ? button.dataset : document.body.dataset;
   if (!settings.auditUrl) return;

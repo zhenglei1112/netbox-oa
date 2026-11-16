@@ -118,7 +118,7 @@ test('tiered and duration calculations retain the effective unit price', async (
     page.requests[0].resolve(data);
     await running;
     assert.ok(page.container.children[0].querySelector('[data-billing-price]').textContent
-      .startsWith('核算单价：12000 元；服务价格：'));
+      .startsWith('核算单价：12000 元；小计：'));
   }
 });
 

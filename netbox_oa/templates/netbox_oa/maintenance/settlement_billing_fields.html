@@ -6,4 +6,4 @@
 <div data-billing-rows data-routine-maintenance-allowed="{{ routine_maintenance_allowed|yesno:'1,0' }}"></div>
 <button class="btn btn-outline-primary mb-3" type="button" data-billing-add><i class="mdi mdi-plus" aria-hidden="true"></i> 添加计费条目</button>
 <p class="fw-bold">本次验收费用合计：<span data-billing-total>—</span> 元 <span class="fw-normal ms-2" data-billing-status role="status" aria-live="polite" {% if not pricing_error %}hidden{% endif %}>{{ pricing_error }}</span> <a class="fw-normal ms-2" data-billing-contract-link href="{{ billing_contract_url }}" target="_blank" rel="noopener noreferrer" {% if rules %}hidden{% endif %}>维护合同计费</a></p>
-<script src="{% static 'netbox_oa/maintenance-billing.js' %}?v=20261112-6" defer></script>
+<script src="{% static 'netbox_oa/maintenance-billing.js' %}?v=20261116-1" defer></script>

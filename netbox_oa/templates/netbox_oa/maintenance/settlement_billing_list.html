@@ -17,7 +17,7 @@
     {% else %}<p class="text-warning">尚未维护计费明细。</p>{% endif %}
   </div>
 </div>
-{% empty %}<p class="alert alert-info">暂无费用明细，可在验收申请环节直接维护，无需先上传服务结算单。</p>{% endfor %}
+{% empty %}<p class="alert alert-info">暂无费用明细，可在验收申请环节直接维护，无需先上传服务验收申请单。</p>{% endfor %}
 <p class="fw-bold">当前有效费用明细合计：{{ total }} 元</p>
 </div>
 {% endblock %}

@@ -21,7 +21,7 @@ class TaskNavigationTests(TestCase):
     worker = test_maintenance.MaintenanceTests.worker
     grant = test_maintenance.MaintenanceTests.grant
 
-    def handle(self, operation, expected, *, version="", **data):
+    def handle(self, operation, expected, *, version="", tab="done", **data):
         self.start()
         test_maintenance.sign_task(self.current(), acting_user(self))
         services.create_order(
@@ -33,17 +33,18 @@ class TaskNavigationTests(TestCase):
             "plugins:netbox_oa:maintenancetask_action", args=[self.current().pk, operation],
         ), {
             "comment": "办理意见", "return_panel": "routing",
-            "return_query": f"ui={version}&tab=done&q=missing&stage=report&node=不存在"
+            "return_query": f"ui={version}&tab={tab}&q=missing&stage=report&node=不存在"
                             "&sort=waiting&page=9&scope=done&history=100&section=history",
             **data,
         })
         route = "maintenance_workbench_v2"
         self.assertEqual(urlsplit(response.url).path, reverse(f"plugins:netbox_oa:{route}"))
         params = parse_qs(urlsplit(response.url).query)
-        self.assertEqual(params["tab"], ["done"])
+        self.assertEqual(params["tab"], [tab])
         self.assertEqual(params["q"], ["missing"])
         self.assertEqual(params["restore"], ["1"])
         page = self.client.get(response.url)
+        self.assertEqual(page.context["tab"], tab)
         self.assertIsNone(page.context["detail"])
         self.assertContains(page, expected)
         self.assertContains(page, "data-oa-task-completed")
@@ -51,6 +52,18 @@ class TaskNavigationTests(TestCase):
 
     def test_approval_retains_filters_and_displays_result(self):
         self.handle("complete", "已同意。")
+
+    def test_approval_returns_to_todo(self):
+        self.handle("complete", "已同意。", tab="todo")
+
+    def test_approval_returns_to_delegate(self):
+        self.handle("complete", "已同意。", tab="delegate")
+
+    def test_approval_returns_to_following(self):
+        self.handle("complete", "已同意。", tab="following")
+
+    def test_approval_returns_to_all(self):
+        self.handle("complete", "已同意。", tab="all")
 
     def test_return_retains_v2_filters(self):
         self.handle("return", "已退回补正。", version="v2")
@@ -64,13 +77,21 @@ class TaskNavigationTests(TestCase):
         self.handle("countersign", "已加签。", version="v2", user_id=other.pk)
 
     def test_last_task_returns_to_empty_todo(self):
+        self.finish_payment("todo")
+
+    def test_last_payment_task_returns_to_empty_pending_payment(self):
+        self.finish_payment("pending_payment")
+
+    def finish_payment(self, tab):
         self.reach("payment_eip")
         for material, state in self.order.steps_snapshot[self.current().position]["required"]:
             self.upload(material, state)
         self.client.force_login(acting_user(self))
         response = self.client.post(reverse(
             "plugins:netbox_oa:maintenancetask_action", args=[self.current().pk, "complete"],
-        ), {"comment": "付款申请完成", "external_reference": "EIP-NAVIGATION"}, follow=True)
+        ), {"comment": "付款申请完成", "external_reference": "EIP-NAVIGATION",
+            "return_query": f"tab={tab}"}, follow=True)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["tab"], tab)
         self.assertIsNone(response.context["detail"])
         self.assertContains(response, "本阶段办理完成。")

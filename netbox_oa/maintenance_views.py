@@ -438,9 +438,9 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                     rules.append("填写并保存维护服务工单，核对外购合同、服务单位及服务省市")
                     rules.append("必须由申请人本人完成手写签名后提交；表单修订后须重新签名")
                 elif step_key == "acceptance_apply":
-                    rules.append("填写工单服务验收单，基本信息自动带入且只读，选择验收结果并填写结算金额")
+                    rules.append("填写工单服务验收单，基本信息自动带入且只读，选择验收结论并填写结算金额")
                     rules.append(
-                        "至少上传一份服务报告和一份服务结算单扫描件，两类附件均无需用印；"
+                        "至少上传一份服务报告和一份服务验收申请单扫描件，两类附件均无需用印；"
                         "支持多选或拖入 PDF、PNG、JPEG 文件，每份不超过 20 MB"
                     )
                     rules.append("退回后修订验收单并更新两类附件，再重新提交复核")
@@ -516,7 +516,7 @@ class MaintenanceFlowDefinitionView(LoginRequiredMixin, View):
                     "公司审批通过后自动加盖电子公章和日期，进入工单验收。"
                 ),
                 "acceptance": (
-                    "填写验收单并上传服务报告、服务结算单，申请人、复核人和部门审核人签名后，"
+                    "填写验收单并上传服务报告、服务验收申请单，申请人、复核人和部门审核人签名后，"
                     "公司审批通过后自动加盖电子公章和日期，进入付款申请。"
                 ),
                 "payment": "在合同中维护付款信息，经部门审核后登记外部付款申请。",

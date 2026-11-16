@@ -164,7 +164,7 @@ class SettlementTests(TestCase):
         self.assertNotContains(page, 'name="settlement_period_mode"')
         self.assertNotContains(page, 'name="period_start"')
         self.assertNotContains(page, 'name="period_end"')
-        self.assertContains(page, "上传服务结算单")
+        self.assertContains(page, "上传服务验收申请单")
         upload_page = self.client.get(reverse(
             "plugins:netbox_oa:maintenance_material_upload", args=[self.order.pk, "settlement"]
         ))

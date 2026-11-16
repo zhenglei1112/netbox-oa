@@ -66,7 +66,7 @@ class AcceptanceTests(TestCase):
             services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.form()
         self.upload("report", "scan")
-        with self.assertRaisesMessage(ValidationError, "服务结算单"):
+        with self.assertRaisesMessage(ValidationError, "服务验收申请单"):
             services.complete_task(pk=self.current().pk, actor=acting_user(self))
         scan = self.upload("settlement", "scan")
         self.assertFalse(scan.is_sealed)
@@ -94,7 +94,7 @@ class AcceptanceTests(TestCase):
                       args=[self.order.pk, "acceptance"])
         page = self.client.get(url)
         field = page.context["form"].fields["service_effect"]
-        self.assertEqual(field.label, "验收结果")
+        self.assertEqual(field.label, "验收结论")
         self.assertEqual(list(field.choices), [("", "请选择"), ("passed", "通过"),
                                               ("failed", "不通过")])
         for value, label in (("passed", "通过"), ("failed", "不通过")):
@@ -104,7 +104,7 @@ class AcceptanceTests(TestCase):
                 response = self.client.get(reverse(
                     f"plugins:netbox_oa:{route}", args=[document.pk],
                 ))
-                self.assertContains(response, "验收结果")
+                self.assertContains(response, "验收结论")
                 self.assertEqual(response.context[
                     "acceptance_result" if route == "maintenance_verify" else "service_effect_label"
                 ], label)
@@ -208,7 +208,7 @@ class AcceptanceTests(TestCase):
         services.complete_task(pk=self.current().pk, actor=acting_user(self))
         self.client.force_login(self.actor)
         page = self.client.get(reverse("plugins:netbox_oa:maintenance_print", args=[form.pk]))
-        for text in ("工单服务验收单", "验收结果", "通过", "￥1,234.56", "复核人", "部门审核",
+        for text in ("工单服务验收单", "验收结论", "通过", "￥1,234.56", "复核人", "部门审核",
                      "验收人"):
             self.assertContains(page, text)
         for text in ("服务要求", "申请人", "部门审核人"):
@@ -233,11 +233,11 @@ class AcceptanceTests(TestCase):
         url = reverse("plugins:netbox_oa:maintenance_company_form",
                       args=[self.order.pk, "acceptance"])
         page = self.client.get(url)
-        self.assertContains(page, 'data-required-message="请选择验收结果。"')
+        self.assertContains(page, 'data-required-message="请选择验收结论。"')
         page = self.client.post(url, {**company_form_initial(self.order),
                                       "settlement_amount": "1234.56", "service_effect": ""})
         self.assertEqual(page.status_code, 200)
-        self.assertEqual(page.context["form"].errors["service_effect"], ["请选择验收结果。"])
+        self.assertEqual(page.context["form"].errors["service_effect"], ["请选择验收结论。"])
 
     def test_upload_and_edit_entrypoints_follow_nodes_and_freeze_approval_evidence(self):
         self.application()
@@ -258,9 +258,9 @@ class AcceptanceTests(TestCase):
             'class="btn d-inline-flex align-items-center justify-content-center"', control
         )
         self.assertIn('mdi mdi-calculator icon m-0 d-inline-flex', control)
-        self.assertIn('aria-label="维护服务结算单计费明细"', control)
-        self.assertIn('维护服务结算单计费明细', control)
-        self.assertContains(page, 'aria-label="维护服务结算单计费明细"', count=1)
+        self.assertIn('aria-label="维护服务验收申请单计费明细"', control)
+        self.assertIn('维护服务验收申请单计费明细', control)
+        self.assertContains(page, 'aria-label="维护服务验收申请单计费明细"', count=1)
         self.apply()
         with self.assertRaises(ValidationError):
             self.form()

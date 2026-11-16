@@ -305,6 +305,15 @@ class InboxPresentation:
             label, symbol = activity_meta(event)
             comment = event.details.get("comment", "")
             record_comment = comment if comment.strip() != label else ""
+            if event.action == "complete" and event.task_id:
+                node = order.steps_snapshot[event.task.position]
+                automatic_payment_comments = {
+                    "payment_review": "付款已提交，校验通过，自动流转。",
+                    "payment_eip": "付款已支付，校验通过，自动流转。",
+                }
+                automatic_comment = automatic_payment_comments.get(node.get("key"))
+                if automatic_comment and comment.startswith(automatic_comment):
+                    record_comment = "自动批转"
             record_context = event.description if event.action in {
                 "return", "transfer", "countersign"
             } and event.description not in {label, comment} else ""

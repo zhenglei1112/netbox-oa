@@ -40,7 +40,7 @@
         <dt>提交时间</dt><dd>{% if submitted_at %}<time datetime="{{ submitted_at|date:'c' }}">{{ submitted_at|date:'Y-m-d H:i' }}</time>{% else %}未提交{% endif %}</dd>
         <dt>省份</dt><dd>{{ province }}</dd>
         <dt>位置</dt><dd>{{ location }}</dd>
-        {% if acceptance_result %}<dt>验收结果</dt><dd>{{ acceptance_result }}</dd>{% endif %}
+        {% if acceptance_result %}<dt>验收结论</dt><dd>{{ acceptance_result }}</dd>{% endif %}
       </dl>
       <section class="verify-requirements" aria-labelledby="verify-requirements-heading">
         <h2 id="verify-requirements-heading">服务要求</h2>

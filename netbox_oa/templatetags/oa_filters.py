@@ -81,6 +81,30 @@ def chinese_date(value, include_time=False):
         result += " " + text[11:16]
     return result
 
+@register.filter
+def billing_service_period(billing):
+    """Display the date range across saved billing lines, ignoring missing dates."""
+    billing = billing or {}
+    documents = billing.get("documents", [{"billing_data": billing}])
+    starts, ends = [], []
+    for document in documents:
+        for line in document.get("billing_data", {}).get("lines", []):
+            for key, dates in (("started_at", starts), ("ended_at", ends)):
+                value = line.get(key)
+                if value:
+                    try:
+                        day = parse_date(str(value)[:10])
+                    except ValueError:
+                        continue
+                    if day:
+                        dates.append(day)
+    start = min(starts) if starts else None
+    end = max(ends) if ends else None
+    if start and end and start != end:
+        return f"{chinese_date(start)}至{chinese_date(end)}"
+    return chinese_date(start or end) or ""
+
+
 STATUS_DISPLAY_MAP = {
     WorkflowStatus.DRAFT.value: "草稿",
     WorkflowStatus.PENDING.value: "待审批",

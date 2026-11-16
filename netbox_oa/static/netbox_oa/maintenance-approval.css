@@ -7,8 +7,8 @@
 .oa-approval-panel .oa-panel-body{padding:12px}
 .oa-approval-panel .oa-audit-dialog-scroll{display:flex;flex-direction:column;gap:12px;overflow:hidden}
 .oa-approval-flow{flex:1 1 0;min-height:0;min-width:0}
-.oa-approval-flow .oa-flow-viewport{height:100%;max-height:none;overflow:hidden;padding:0;display:flex;justify-content:center}
-.oa-approval-flow .oa-flow-svg{width:100%;height:100%;max-width:100%;min-width:0;min-height:0}
+.oa-approval-flow .oa-flow-viewport{height:100%;max-height:none;overflow:hidden;padding:0;display:flex;align-items:center;justify-content:center}
+.oa-approval-flow .oa-flow-svg{width:100%;height:100%;max-width:1100px;max-height:700px;min-width:0;min-height:0}
 .oa-approval-flow .oa-flow-stage{font-size:16px}
 .oa-approval-flow .oa-flow-node{cursor:default}
 .oa-approval-state{text-anchor:end;font-size:11px;fill:var(--tblr-secondary,var(--bs-secondary-color,#667085))}
@@ -17,7 +17,7 @@
 .oa-approval-flow .oa-history-returned rect{stroke:var(--tblr-danger-text-emphasis,var(--bs-danger-text-emphasis))}
 .oa-approval-flow .oa-history-cancelled rect{stroke:var(--tblr-secondary,var(--bs-secondary-color));stroke-dasharray:5 3}
 .oa-history-completed{color:var(--tblr-success-text-emphasis,var(--bs-success-text-emphasis))}.oa-history-current{color:var(--tblr-primary,var(--bs-primary))}.oa-history-returned{color:var(--tblr-danger-text-emphasis,var(--bs-danger-text-emphasis))}
-.oa-approval-records{flex:0 1 auto;max-height:clamp(120px,24vh,200px);overflow:auto;margin:0 4px}.oa-approval-records>h3{font-size:1rem;font-weight:600;padding:4px 0;margin:0}
+.oa-approval-records{flex:0 1 auto;max-height:200px;overflow:auto;scrollbar-gutter:stable;margin:0 4px}.oa-approval-records>h3{font-size:1rem;font-weight:600;padding:4px 0;margin:0}
 .oa-record-timeline{--oa-record-node-width:220px;display:flex;list-style:none;margin:0;padding:6px 0 12px;overflow-x:auto;scroll-padding-inline:12px}
 .oa-record-node{position:relative;flex:0 0 var(--oa-record-node-width);min-width:0}
 .oa-record-node:not(:last-child)::before{content:"";position:absolute;top:20px;left:calc(50% + 22px);width:calc(var(--oa-record-node-width) - 44px);height:1px;background:var(--oa-border)}

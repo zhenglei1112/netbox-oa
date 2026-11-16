@@ -15,8 +15,8 @@ ROLES = (
 # Requirements may use "sealed" as a proof requirement, not a document state.
 MATERIALS = (
     ("order", "维护服务工单"),
+    ("settlement", "服务验收申请单"),
     ("report", "服务报告"),
-    ("settlement", "服务结算单"),
     ("acceptance", "工单服务验收单"),
     ("notice", "付款通知书"),
     ("invoice", "电子发票"),

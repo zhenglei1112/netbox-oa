@@ -334,11 +334,14 @@ class InboxTests(TestCase):
                         self.assertIn("扫描件", card)
                         self.assertNotIn('aria-label="编辑"', card)
                 self.assertNotIn("无需填写", html)
+                self.assertNotIn("服务结算单", html)
+                self.assertNotIn("mdi-calculator", html)
+                self.assertIn("服务验收申请单", html)
                 self.assertEqual(
                     [(group["name"], [item["key"] for item in group["materials"]])
                      for group in response.context["detail"]["document_groups"]],
                     [("电子版", ["order", "acceptance"]),
-                     ("扫描件", ["report", "settlement", "notice", "invoice"])],
+                     ("扫描件", ["settlement", "report", "notice", "invoice"])],
                 )
                 self.assertNotIn("甲方表单用于填写基础信息", html)
 
@@ -630,7 +633,9 @@ class InboxTests(TestCase):
         for embed in ("", "1"):
             response = self.client.get(url, {"material": "report", "embed": embed})
             allowed = [group["key"] for group in response.context["groups"] if group["can_upload"]]
-            self.assertEqual(allowed, ["report", "settlement"])
+            self.assertEqual(allowed, ["settlement", "report"])
+            self.assertNotContains(response, "mdi-calculator")
+            self.assertContains(response, "服务验收申请单")
             self.assertContains(response, 'data-review-upload="report"', count=1)
             self.assertContains(response, reverse(
                 "plugins:netbox_oa:maintenance_material_upload", args=[self.order.pk, "report"]
@@ -794,14 +799,15 @@ class InboxTests(TestCase):
                 self.assertNotIn(label, workspace)
                 self.assertIn("提交资料", workspace)
 
-    def test_completed_node_becomes_history_and_returns_to_unfiltered_todo(self):
+    def test_completed_node_becomes_history_and_returns_to_original_list(self):
         self.reach("order_review")
         worker = self.worker("first_handler")
         self.grant(worker, "maintenancetask", "view")
         self.grant(worker, "maintenanceevent", "view")
         self.grant(worker, "maintenancedocument", "add")
         self.grant(worker, "maintenancedocument", "view")
-        session = signatures.create_session(pk=self.current().pk, actor=worker)
+        task = self.current()
+        session = signatures.create_session(pk=task.pk, actor=worker)
         signatures.capture_signature(token=signatures.mobile_token(session), data_url=image_data())
         response = self.action(
             "complete",
@@ -813,13 +819,24 @@ class InboxTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         query = parse_qs(urlparse(response.url).query)
-        self.assertEqual(query, {"tab": ["todo"]})
+        self.assertEqual(query, {
+            "tab": ["todo"], "sort": ["waiting"], "q": ["惠州"],
+            "stage": ["ordering"], "node": ["确认"],
+            "selected": [str(self.order.pk)], "restore": ["1"],
+        })
         page = self.client.get(response.url)
         self.assertEqual(page.status_code, 200)
-        self.assertEqual(page.context["total"], 1)
+        self.assertEqual(page.context["tab"], "todo")
+        self.assertEqual(page.context["total"], 0)
+        self.assertIsNone(page.context["detail"])
         self.assertFalse(page.context["outside_list"])
-        self.assertContains(page, "编号确认无误")
-        self.assertContains(page, "工单复核")
+        self.assertContains(page, "已同意。")
+        task.refresh_from_db()
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.comment, "编号确认无误")
+        history = self.page(actor=worker, selected=self.order.pk)
+        self.assertContains(history, "编号确认无误")
+        self.assertContains(history, "工单复核")
 
     def test_reading_and_failed_operations_do_not_assign_shared_task(self):
         self.reach("order_review")
@@ -1483,6 +1500,39 @@ class InboxTests(TestCase):
             "</svg>", 1
         )[0]
         self.assertNotIn("不可见的审批人", svg)
+
+    def test_automatic_payment_history_uses_compact_comment(self):
+        self.reach("payment_review")
+        originals = {}
+        for prefix in ("付款已提交", "付款已支付"):
+            task = self.current()
+            self.complete()
+            event = self.order.events.get(task=task, action="complete")
+            comment = (
+                f"{prefix}，校验通过，自动流转。\n\n"
+                "付款编号：Y-GD2611D14B\n付款金额：2200.00 元\n付款状态：已支付"
+            )
+            event.details = {**event.details, "comment": comment}
+            event.save()
+            originals[event.pk] = comment
+        response = self.page(panel="activity")
+        records = response.context["detail"]["approval_events"]
+        for item in records:
+            if item["event"].pk in originals:
+                self.assertEqual(item["record_comment"], "自动批转")
+                self.assertEqual(item["event"].details["comment"], originals[item["event"].pk])
+        timeline = render_to_string(
+            "netbox_oa/maintenance/inbox_activity_timeline.html", {"activity_records": records}
+        )
+        self.assertEqual(timeline.count("自动批转"), 2)
+        self.assertNotIn("付款金额", timeline)
+        # A payment handler's own opinion must remain visible in full.
+        event.details["comment"] = "已核对付款金额，请保留银行回单。"
+        event.save()
+        response = self.page(panel="activity")
+        item = next(item for item in response.context["detail"]["approval_events"]
+                    if item["event"].pk == event.pk)
+        self.assertEqual(item["record_comment"], event.details["comment"])
 
     def test_signature_updates_are_folded_into_one_node_record(self):
         self.start()

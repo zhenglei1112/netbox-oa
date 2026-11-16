@@ -333,7 +333,7 @@ class MaintenanceTests(TestCase):
             self.assertEqual(nodes[key]["materials"], [
                 "工单服务验收单 · 电子版",
                 "服务报告 · 扫描版（可多份）",
-                "服务结算单 · 扫描版（可多份）",
+                "服务验收申请单 · 扫描版（可多份）",
             ])
         for key in ("order_review", "order_final", "order_senior_seal"):
             self.assertEqual(nodes[key]["return_label"], "工单修正")
