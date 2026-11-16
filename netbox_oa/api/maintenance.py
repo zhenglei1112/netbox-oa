@@ -1,14 +1,11 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
-from netbox.api.serializers import ValidatedModelSerializer
 from netbox.api.viewsets import NetBoxModelViewSet, NetBoxReadOnlyModelViewSet
 from rest_framework import serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from netbox_oa import maintenance_services as services
-from netbox_oa.maintenance_contracts import order_object_links
-from netbox_oa.maintenance_flow import MATERIALS, ROLES
-from netbox_oa.maintenance_materials import SERVICE_ITEMS
+from netbox_oa.maintenance_flow import MATERIALS
 from netbox_oa.models import (
     MaintenanceDocument,
     MaintenanceOrder,
@@ -16,27 +13,19 @@ from netbox_oa.models import (
     MaintenanceTask,
 )
 
+from .serializers import (
+    MaintenanceDocumentSerializer as DocumentSerializer,
+)
+from .serializers import (
+    MaintenanceOrderSerializer as OrderSerializer,
+)
+from .serializers import (
+    MaintenancePolicySerializer as PolicySerializer,
+)
+from .serializers import (
+    MaintenanceTaskSerializer as TaskSerializer,
+)
 from .views import TransitionViewMixin
-
-
-class PolicySerializer(ValidatedModelSerializer):
-    groups = serializers.SerializerMethodField()
-
-    def get_groups(self, obj):
-        return dict(obj.roles.filter(role__in=dict(ROLES)).values_list("role", "group_id"))
-
-    class Meta:
-        model = MaintenancePolicy
-        fields = (
-            "id",
-            "url",
-            "name",
-            "enabled",
-            "is_default",
-            "sla_hours",
-            "warning_hours",
-            "groups",
-        )
 
 
 class PolicyWriteSerializer(serializers.Serializer):
@@ -48,141 +37,12 @@ class PolicyWriteSerializer(serializers.Serializer):
     groups = serializers.DictField(child=serializers.IntegerField(min_value=1))
 
 
-class ServiceItemsSerializerField(serializers.ListField):
-    def to_internal_value(self, data):
-        if isinstance(data, str):
-            data = [data]
-        return super().to_internal_value(data)
-
-
-class OrderSerializer(ValidatedModelSerializer):
-    service_type = ServiceItemsSerializerField(
-        child=serializers.ChoiceField(choices=SERVICE_ITEMS), allow_empty=False,
-    )
-    current_contract_type = serializers.SerializerMethodField()
-
-    def get_current_contract_type(self, obj):
-        return order_object_links(obj, self.context["request"].user)["current_contract_type"]
-
-    contract_id = serializers.IntegerField(min_value=1)
-    service_region_ids = serializers.ListField(
-        child=serializers.IntegerField(min_value=1), required=False, allow_empty=False
-    )
-
-    def validate(self, attrs):
-        return attrs
-
-    def create(self, data):
-        return services.create_order(actor=self.context["request"].user, **data)
-
-    class Meta:
-        model = MaintenanceOrder
-        fields = (
-            "id",
-            "url",
-            "number",
-            "policy",
-            "requester",
-            "owner",
-            "service_type",
-            "priority",
-            "supplier",
-            "contract_number",
-            "contract_id",
-            "contract_type_snapshot",
-            "number_type_snapshot",
-            "current_contract_type",
-            "service_region",
-            "service_region_ids",
-            "service_location",
-            "contact_phone",
-            "requirements",
-            "fault_reference",
-            "status",
-            "stage",
-            "current_position",
-            "steps_snapshot",
-            "payment_status",
-            "completed_at",
-            "created",
-            "last_updated",
-        )
-        read_only_fields = (
-            "number",
-            "contract_type_snapshot",
-            "number_type_snapshot",
-            "supplier",
-            "contract_number",
-            "service_region",
-            "requester",
-            "status",
-            "stage",
-            "current_position",
-            "steps_snapshot",
-            "payment_status",
-            "completed_at",
-        )
-
-
-class TaskSerializer(ValidatedModelSerializer):
-    class Meta:
-        model = MaintenanceTask
-        fields = (
-            "id",
-            "url",
-            "order",
-            "position",
-            "name",
-            "kind",
-            "assigned_group",
-            "assigned_user",
-            "status",
-            "deadline",
-            "started_at",
-            "completed_at",
-            "decided_by",
-            "comment",
-            "external_reference",
-            "evidence",
-            "is_countersign",
-            "created",
-        )
-        read_only_fields = fields
-
-
 class TaskActionSerializer(serializers.Serializer):
     comment = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
     external_reference = serializers.CharField(
         max_length=200, required=False, allow_blank=True, default=""
     )
     user_id = serializers.IntegerField(min_value=1, required=False)
-
-
-class DocumentSerializer(ValidatedModelSerializer):
-    class Meta:
-        model = MaintenanceDocument
-        # Never serialize the private file's storage URL.
-        fields = (
-            "id",
-            "order",
-            "material",
-            "version",
-            "item_number",
-            "replaces_document",
-            "display_name",
-            "original_name",
-            "kind",
-            "form_data",
-            "billing_data",
-            "source_document",
-            "uploaded_task",
-            "is_sealed",
-            "uploaded_by",
-            "state",
-            "note",
-            "created",
-        )
-        read_only_fields = fields
 
 
 class DocumentWriteSerializer(serializers.Serializer):

@@ -9,6 +9,7 @@ from django.db.models import ProtectedError
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.module_loading import import_string
 from django_fsm_log.models import StateLog
 from rest_framework.test import APIClient
 from users.models import Group
@@ -65,6 +66,51 @@ def acting_user(case, task=None):
 
 class MaintenanceTests(TestCase):
     grant = test_workflows.WorkflowTests.grant
+
+    def test_maintenance_serializers_follow_netbox_discovery_convention(self):
+        from netbox_oa.api.maintenance import (
+            DocumentViewSet,
+            OrderViewSet,
+            PolicyViewSet,
+            TaskViewSet,
+        )
+
+        # NetBox resolves model serializers by this path, independently of the viewset.
+        for viewset in (PolicyViewSet, OrderViewSet, TaskViewSet, DocumentViewSet):
+            model = viewset.queryset.model
+            with self.subTest(model=model.__name__):
+                serializer = import_string(
+                    f"{model._meta.app_label}.api.serializers.{model.__name__}Serializer"
+                )
+                self.assertIs(serializer.Meta.model, model)
+                self.assertIs(serializer, viewset.serializer_class)
+
+        policy_serializer = PolicyViewSet.serializer_class(self.policy)
+        self.assertEqual(policy_serializer.data["groups"], {
+            role: self.group.pk for role, _ in ROLES
+        })
+        self.assertEqual(policy_serializer.data["sla_hours"], self.policy.sla_hours)
+
+    def test_policy_configuration_pages_and_save(self):
+        self.client.force_login(self.actor)
+        add_url = reverse("plugins:netbox_oa:maintenancepolicy_add")
+        edit_url = reverse("plugins:netbox_oa:maintenancepolicy", args=[self.policy.pk])
+        for url in (add_url, edit_url):
+            with self.subTest(url=url):
+                self.assertContains(self.client.get(url), "维护流程角色与时限配置")
+
+        response = self.client.post(edit_url, {
+            "name": self.policy.name,
+            "enabled": "on",
+            "is_default": "on",
+            "sla_hours": 48,
+            "warning_hours": 6,
+            **{role: self.group.pk for role, _ in ROLES},
+        })
+        self.assertRedirects(response, edit_url)
+        self.policy.refresh_from_db()
+        self.assertEqual(self.policy.sla_hours, 48)
+        self.assertEqual(self.policy.warning_hours, 6)
 
     def setUp(self):
         self.actor = get_user_model().objects.create_superuser(
