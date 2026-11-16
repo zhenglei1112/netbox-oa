@@ -7,8 +7,11 @@ from netbox_oa.maintenance_flow import ROLES
 from netbox_oa.maintenance_materials import SERVICE_ITEMS
 from netbox_oa.models import (
     MaintenanceDocument,
+    MaintenanceEvent,
+    MaintenanceLink,
     MaintenanceOrder,
     MaintenancePolicy,
+    MaintenanceRole,
     MaintenanceTask,
     WorkflowDefinition,
     WorkflowInstance,
@@ -113,6 +116,14 @@ class MaintenancePolicySerializer(ValidatedModelSerializer):
             "warning_hours",
             "groups",
         )
+
+
+class MaintenanceRoleSerializer(ValidatedModelSerializer):
+    class Meta:
+        model = MaintenanceRole
+        # This model is managed through policy configuration, without an API detail URL.
+        fields = ("id", "display", "policy", "role", "group", "created", "last_updated")
+        read_only_fields = fields
 
 
 class ServiceItemsSerializerField(serializers.ListField):
@@ -240,5 +251,25 @@ class MaintenanceDocumentSerializer(ValidatedModelSerializer):
             "state",
             "note",
             "created",
+        )
+        read_only_fields = fields
+
+
+class MaintenanceEventSerializer(ValidatedModelSerializer):
+    class Meta:
+        model = MaintenanceEvent
+        fields = (
+            "id", "display", "order", "task", "actor", "action", "description", "details",
+            "created", "last_updated",
+        )
+        read_only_fields = fields
+
+
+class MaintenanceLinkSerializer(ValidatedModelSerializer):
+    class Meta:
+        model = MaintenanceLink
+        fields = (
+            "id", "display", "order", "object_type", "object_id", "label", "created",
+            "last_updated",
         )
         read_only_fields = fields
