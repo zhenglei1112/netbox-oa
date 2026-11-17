@@ -140,7 +140,11 @@ class MaintenanceOrderSerializer(ValidatedModelSerializer):
     current_contract_type = serializers.SerializerMethodField()
 
     def get_current_contract_type(self, obj):
-        return order_object_links(obj, self.context["request"].user)["current_contract_type"]
+        request = self.context.get("request")
+        if request is None:
+            # NetBox also serializes models for internal snapshots without an HTTP request.
+            return obj.contract_type_snapshot
+        return order_object_links(obj, request.user)["current_contract_type"]
 
     contract_id = serializers.IntegerField(min_value=1)
     service_region_ids = serializers.ListField(
