@@ -5,9 +5,12 @@ from . import contract_views
 from . import maintenance_billing_views as billing_views
 from . import maintenance_signature_views as signatures
 from . import maintenance_views as views
+from .ledger import WorkOrderLedgerView
 from .models import MaintenanceOrder
 
 urlpatterns = [
+    path("maintenance/ledger/", WorkOrderLedgerView.as_view(), name="workorderledger_list"),
+    path("maintenance/ledger/", WorkOrderLedgerView.as_view(), name="maintenanceorder_list"),
     path("maintenance/preferences/guide/",
          views.MaintenanceGuidePreferenceView.as_view(), name="maintenance_guide_preference"),
     path("maintenance/orders/<int:pk>/settlement-billing/new/",

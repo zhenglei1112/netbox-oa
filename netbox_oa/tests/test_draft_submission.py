@@ -195,9 +195,16 @@ class DraftSubmissionTests(TestCase):
         signing.capture_signature(token=signing.mobile_token(signature), data_url=image_data())
         response = self.client.post(
             result["form_action"],
-            {**data, "expected_document_id": signature.document_id, "_submit": "1"},
+            {**data, "expected_document_id": signature.document_id, "_submit": "1",
+             "return_query": "tab=todo&stage=acceptance&sort=waiting"},
         )
         self.assertEqual(response.status_code, 302, response.content)
+        workbench = self.client.get(response.url)
+        self.assertEqual(workbench.context["tab"], "done")
+        self.assertEqual(workbench.context["detail"]["order"].pk, order.pk)
+        self.assertEqual(workbench.context["rows"][0]["order"].pk, order.pk)
+        self.assertEqual(workbench.context["stage_filter"], "")
+        self.assertIn("sort=waiting", workbench.context["list_url"])
         order.refresh_from_db()
         self.assertEqual(order.status, "active")
         self.assertEqual(order.tasks.get(status="pending").name, "工单复核")

@@ -1,0 +1,8 @@
+<div id="oa-ledger-totals" class="btn-list" role="status" aria-label="查询结果合计"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
+  <span class="btn btn-primary pe-none">查询条目 {{ ledger_totals.count }}</span>
+  <span class="btn btn-success pe-none">总结算金额 {{ ledger_totals.amount|floatformat:"2g" }} 元</span>
+  <span class="btn btn-info pe-none">工单下单 {{ ledger_totals.ordering }}</span>
+  <span class="btn btn-warning pe-none">工单验收 {{ ledger_totals.acceptance }}</span>
+  <span class="btn btn-purple pe-none">付款申请 {{ ledger_totals.payment }}</span>
+  <span class="btn btn-success pe-none">已完成 {{ ledger_totals.completed }}</span>
+</div>

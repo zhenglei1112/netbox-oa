@@ -9,6 +9,7 @@ from django.urls import reverse
 from django_fsm import FSMField, transition
 from django_fsm_log.decorators import fsm_log_by, fsm_log_description
 from netbox.models import ChangeLoggedModel
+from utilities.querysets import RestrictedQuerySet
 
 from .choices import TaskStatus, WorkflowStatus
 from .maintenance_flow import DOCUMENT_MATERIALS, ROLES, STAGES
@@ -279,6 +280,14 @@ class MaintenanceRole(ChangeLoggedModel):
         verbose_name_plural = "维护审批角色"
 
 
+class MaintenanceOwnerCode(models.Model):
+    _netbox_private = True
+    actor = models.OneToOneField(
+        settings.AUTH_USER_MODEL, primary_key=True, on_delete=models.PROTECT,
+    )
+    letter = models.CharField(max_length=1, unique=True)
+
+
 class MaintenanceNumberReservation(models.Model):
     _netbox_private = True
     number = models.CharField(max_length=40, primary_key=True)
@@ -419,6 +428,40 @@ class MaintenanceOrder(MaintenanceChangeLogMixin, WorkflowStateModel):
     @transition(field=status, source="draft", target="cancelled")
     def withdraw(self, *, by, description=""):
         pass
+
+
+class WorkOrderLedger(models.Model):
+    """Read-only projection of maintenance orders with its own NetBox object permissions."""
+
+    objects = RestrictedQuerySet.as_manager()
+    created = models.DateTimeField(null=True)
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, related_name="+",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.DO_NOTHING, related_name="+",
+        verbose_name="线路主管",
+    )
+    number = models.CharField(max_length=40)
+    service_type = models.JSONField()
+    supplier = models.CharField(max_length=200)
+    contract_id = models.PositiveBigIntegerField(null=True)
+    contract_number = models.CharField(max_length=100)
+    service_region = models.CharField(max_length=200)
+    service_region_ids = models.JSONField()
+    status = models.CharField(
+        max_length=20, choices=MaintenanceOrder._meta.get_field("status").choices,
+    )
+    stage = models.CharField(max_length=20, choices=STAGES)
+    current_position = models.PositiveIntegerField()
+
+    class Meta:
+        managed = False
+        db_table = "netbox_oa_maintenanceorder"
+        default_permissions = ("view",)
+        ordering = ("-created", "-pk")
+        verbose_name = "工单台账"
+        verbose_name_plural = "工单台账"
 
 
 class MaintenanceTask(MaintenanceChangeLogMixin, WorkflowStateModel):

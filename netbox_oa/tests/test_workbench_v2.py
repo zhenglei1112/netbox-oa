@@ -123,6 +123,23 @@ class WorkbenchV2Tests(TestCase):
         self.assertContains(response, self.order.supplier)
         self.assertContains(response, self.order.contract_number)
 
+    def test_targeted_links_choose_the_current_tab_across_workbench_routes(self):
+        self.start()
+        self.client.force_login(self.approver)
+        for route, args, params in (
+            ("maintenanceorder", [self.order.pk], {"tab": "todo"}),
+            ("maintenance_workbench", [], {"selected": self.order.pk}),
+            ("maintenance_workbench_v2", [], {"selected": self.order.pk, "locate": "1",
+                                               "tab": "done"}),
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(reverse(f"plugins:netbox_oa:{route}", args=args), params)
+                self.assertEqual(response.context["tab"], "delegate")
+                self.assertEqual(response.context["rows"][0]["order"].pk, self.order.pk)
+                self.assertEqual(response.context["detail"]["order"].pk, self.order.pk)
+                self.assertContains(response, 'data-located-order="true"')
+                self.assertNotIn("locate=", response.context["detail_url"])
+
     def test_each_live_node_has_guidance_and_completed_order_has_no_action(self):
         self.start()
         seen = set()

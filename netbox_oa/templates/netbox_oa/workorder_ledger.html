@@ -1,0 +1,20 @@
+{% extends 'generic/object_list.html' %}
+{% load static %}
+
+{% block title %}工单台账{% endblock %}
+
+{% block head %}
+  {{ block.super }}
+  <script src="{% static 'netbox_oa/workorder-ledger.js' %}" defer></script>
+  <style>
+    .sticky-actions:has(#oa-ledger-totals) {
+      margin-inline-start: 0;
+      margin-inline-end: auto;
+      align-self: flex-start;
+    }
+  </style>
+{% endblock %}
+
+{% block bulk_buttons %}
+  {% include 'netbox_oa/workorder_ledger_totals.html' %}
+{% endblock %}

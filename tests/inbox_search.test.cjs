@@ -4,7 +4,7 @@ const {test} = require('node:test');
 const {runInNewContext} = require('node:vm');
 const source = readFileSync('netbox_oa/static/netbox_oa/maintenance-inbox.js', 'utf8');
 
-function setup({action = false, taskCompleted = false, responseOk = true} = {}) {
+function setup({action = false, taskCompleted = false, responseOk = true, locatedOrder} = {}) {
   const handlers = {}, timers = new Map(), replacements = [], requests = [], historyCalls = [];
   const requestOptions = [], loadingStates = [];
   let submitted = 0, timerId = 0;
@@ -27,7 +27,7 @@ function setup({action = false, taskCompleted = false, responseOk = true} = {}) 
     matches: selector => selector.includes('.oa-filters'), requestSubmit() {submitted++;}};
   const input = {isConnected: true, form, matches: selector => selector.includes('[name="q"]')};
   const next = {...node(), dataset: {listUrl: '/workbench/?tab=todo&q=2026',
-    detailUrl: '/workbench/?tab=todo&selected=8'},
+    detailUrl: '/workbench/?tab=todo&selected=8', locatedOrder},
     setAttribute() {}, removeAttribute() {},
     querySelector: selector => action
       ? selector === '[data-oa-task-completed]' ? (taskCompleted ? {} : null)
@@ -172,5 +172,12 @@ test('failed handling keeps scroll and does not show completion feedback', async
   await page.dispatch('submit', {target: handlingForm(), preventDefault() {}});
   assert.deepEqual(page.replacements, ['root']);
   assert.equal(page.sections['.oa-order-list'].scrollTop, 200);
+  assert.equal(page.sections['.oa-detail'].scrollTop, 200);
+});
+
+test('returning to a located order reveals the target at the top of the list', async () => {
+  const page = setup({action: true, locatedOrder: 'true'});
+  await page.dispatch('submit', {target: handlingForm(), preventDefault() {}});
+  assert.equal(page.sections['.oa-order-list'].scrollTop, 0);
   assert.equal(page.sections['.oa-detail'].scrollTop, 200);
 });

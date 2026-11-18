@@ -11,6 +11,13 @@ from netbox_oa.time_display import format_duration
 register = template.Library()
 
 
+@register.filter
+def service_type_badges(value):
+    from netbox_oa.maintenance_presentation import service_type_badges as render_badges
+
+    return render_badges(value)
+
+
 def _money_amount(value):
     try:
         amount = Decimal(str(value))

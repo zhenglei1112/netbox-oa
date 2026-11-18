@@ -585,9 +585,10 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             if 0 <= position < len(steps)
             and steps[position].get("key") in {"payment_plan", "payment_eip"}
         ]
-        tab = request.GET.get("tab", "todo")
+        tab = request.GET.get("tab", "")
         if tab == "mine":
             tab = "done"
+        requested_tab = tab
         if tab not in {"todo", "pending_payment", "delegate", "done", "following", "all"}:
             tab = "todo"
         drafts = MaintenanceOrder.objects.restrict(request.user, "change").filter(
@@ -610,17 +611,36 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             "following": orders.filter(followers=request.user),
             "all": orders,
         }
+        selected_id = request.GET.get("selected", "")
+        restore_list = pk is None and request.GET.get("restore") == "1"
+        selected = None
+        if pk is not None or (selected_id.isdecimal() and not restore_list):
+            selected = get_object_or_404(orders, pk=pk if pk is not None else selected_id)
+        locate_order = selected is not None and status == 200 and (
+            pk is not None or "tab" not in request.GET or request.GET.get("locate") == "1"
+        )
+        tab_has_target = False
+        if locate_order:
+            candidates = ("pending_payment", "todo", "delegate", "done", "following")
+            if request.user.is_superuser:
+                candidates += ("all",)
+            if requested_tab in candidates:
+                candidates = (requested_tab, *candidates)
+            for key in dict.fromkeys(candidates):
+                if groups[key].filter(pk=selected.pk).exists():
+                    tab = key
+                    tab_has_target = True
+                    break
+            else:
+                tab = "todo"
         filtered = groups[tab]
-        if pk:
-            selected = get_object_or_404(orders, pk=pk)
-        else:
-            selected = None
+        filters = Q()
         stage = request.GET.get("stage", "")
         if stage in dict(STAGES):
-            filtered = filtered.filter(stage=stage)
+            filters &= Q(stage=stage)
         query = request.GET.get("q", "").strip()
         if query:
-            filtered = filtered.filter(
+            filters &= (
                 Q(number__icontains=query)
                 | Q(supplier__icontains=query)
                 | Q(contract_number__icontains=query)
@@ -630,7 +650,15 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             matching = MaintenanceTask.objects.restrict(request.user, "view").filter(
                 status="pending", name__icontains=node
             )
-            filtered = filtered.filter(pk__in=matching.values("order_id"))
+            filters &= Q(pk__in=matching.values("order_id"))
+        query_params = request.GET.copy()
+        if filters:
+            filtered = filtered.filter(filters)
+            if tab_has_target and not filtered.filter(pk=selected.pk).exists():
+                filtered = groups[tab]
+                stage = query = node = ""
+                for key in ("stage", "q", "node"):
+                    query_params.pop(key, None)
         if request.GET.get("sort") == "waiting":
             pending = MaintenanceTask.objects.restrict(request.user, "view").filter(
                 order_id=OuterRef("pk"), status="pending"
@@ -638,18 +666,21 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             filtered = filtered.annotate(
                 waiting_since=Subquery(pending.values("created")[:1])
             ).order_by("waiting_since", "pk")
-        rows = list(filtered[:100])
+        if tab_has_target:
+            # Keep a directly opened order visible even when it falls beyond the list limit.
+            rows = [selected, *filtered.exclude(pk=selected.pk)[:99]]
+        else:
+            rows = list(filtered[:100])
         if not selected:
-            selected_id = request.GET.get("selected", "")
-            if selected_id.isdecimal():
-                if request.GET.get("restore") == "1":
-                    selected = filtered.filter(pk=selected_id).first()
-                    if selected is None:
-                        selected = rows[0] if rows else None
-                else:
-                    selected = get_object_or_404(orders, pk=selected_id)
-            else:
-                selected = rows[0] if rows else None
+            if restore_list and selected_id.isdecimal():
+                selected = filtered.filter(pk=selected_id).first()
+            if selected is None and rows:
+                selected = rows[0]
+        outside_list = False
+        if selected and all(order.pk != selected.pk for order in rows):
+            outside_list = not filtered.filter(pk=selected.pk).exists()
+            if not outside_list:
+                rows = [selected, *rows[:99]]
         display_orders = {order.pk: order for order in rows}
         if selected:
             display_orders[selected.pk] = selected
@@ -661,9 +692,8 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
         # Bound user input by the number of visible records, not an arbitrary truncation.
         if selected and history_limit > 50:
             history_limit = min(history_limit, inbox.events.filter(order=selected).count() + 50)
-        query_params = request.GET.copy()
         query_params["tab"] = tab
-        for key in ("selected", "history", "panel", "pane", "restore"):
+        for key in ("selected", "history", "panel", "pane", "restore", "locate"):
             query_params.pop(key, None)
         query_params.pop("ui", None)
         base_url = reverse("plugins:netbox_oa:maintenance_workbench_v2")
@@ -712,7 +742,8 @@ class MaintenanceWorkbenchView(LoginRequiredMixin, View):
             "detail_url": detail_url,
             "history_url": f"{base_url}?{detail_params.urlencode()}",
             "return_query": query_params.urlencode(),
-            "outside_list": bool(selected and not filtered.filter(pk=selected.pk).exists()),
+            "outside_list": outside_list,
+            "located_order": tab_has_target,
             "mobile_detail": bool(pk or request.GET.get("selected")),
             "action_error": action_error,
             "panel_id": request.GET.get("panel", ""),
@@ -960,29 +991,25 @@ def workbench_params(request):
     return params
 
 
-def workbench_return_url(request, order_id):
+def workbench_return_url(request, order_id, *, panel="", restore_list=False):
     params = workbench_params(request)
     params["selected"] = order_id
-    params["restore"] = "1"
+    params["restore" if restore_list else "locate"] = "1"
+    if panel:
+        params["panel"] = panel
     return f"{reverse('plugins:netbox_oa:maintenance_workbench_v2')}?{params.urlencode()}"
 
 
 def workbench_redirect(request, order_id):
-    params = workbench_params(request)
-    params["selected"] = order_id
-    params["restore"] = "1"
     panel = request.POST.get("return_panel", "")
-    if panel in {f"material-{key}" for key, _ in MATERIALS}:
-        params["panel"] = panel
-    params.pop("ui", None)
-    return redirect(
-        f"{reverse('plugins:netbox_oa:maintenance_workbench_v2')}?{params.urlencode()}"
-    )
+    if panel not in {f"material-{key}" for key, _ in MATERIALS}:
+        panel = ""
+    return redirect(workbench_return_url(request, order_id, panel=panel))
 
 
 def task_success_redirect(request, order_id):
     """Retain the current category and select the first remaining order if needed."""
-    return redirect(workbench_return_url(request, order_id))
+    return redirect(workbench_return_url(request, order_id, restore_list=True))
 
 
 def workbench_error(request, order_id, error, form=None, status=400):

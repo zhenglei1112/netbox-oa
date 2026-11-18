@@ -1,5 +1,7 @@
 """Small native view adapters for standalone HTTP tests, not production implementations."""
 
+import csv
+
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
@@ -46,6 +48,9 @@ class ObjectChangeLogView(LoginRequiredMixin, View):
 
 
 class ObjectListView(BaseObjectView):
+    def get_extra_context(self, request):
+        return {}
+
     def get_table(self, data, request, bulk_actions=True):
         table = self.table(data)
         for name in ("pk", "id", "actions", "created"):
@@ -56,8 +61,14 @@ class ObjectListView(BaseObjectView):
 
     def get(self, request):
         queryset = self.filterset(request.GET, self.queryset, request=request).qs
+        table = self.get_table(queryset, request)
+        if request.GET.get("export") in ("", "table"):
+            response = HttpResponse(content_type="text/csv")
+            response["Content-Disposition"] = 'attachment; filename="ledger.csv"'
+            csv.writer(response).writerows(table.as_values(exclude_columns=("pk", "actions")))
+            return response
         return render(request, self.template_name, {
-            "model": self.queryset.model, "table": self.get_table(queryset, request),
-            "filter_form": self.filterset_form(request.GET), "actions": (),
+            "model": self.queryset.model, "table": table,
+            "filter_form": self.filterset_form(request.GET), "actions": getattr(self, "actions", ()),
             **self.get_extra_context(request),
         })

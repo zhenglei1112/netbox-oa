@@ -18,11 +18,69 @@ from netbox_oa.maintenance_contracts import selected_contract
 from netbox_oa.maintenance_flow import ROLES
 from netbox_oa.maintenance_forms import MaintenanceOrderEditForm, MaintenanceOrderForm
 from netbox_oa.maintenance_numbering import SALT, issue_number, number_from_token
-from netbox_oa.models import MaintenanceNumberReservation, MaintenanceOrder
+from netbox_oa.models import MaintenanceNumberReservation, MaintenanceOrder, MaintenanceOwnerCode
 from netbox_oa.tests import test_maintenance
 from netbox_oa.tests.test_maintenance import acting_user
 from tests.support.contracts.models import Contract
 from tests.support.dcim.models import Region
+
+
+class OwnerNumberingTests(TestCase):
+    def test_existing_number_and_token_remain_valid_after_assignment(self):
+        actor = get_user_model().objects.create_user(username="existing_owner")
+        old_number = "Y-GD261103E"
+        MaintenanceNumberReservation.objects.create(number=old_number, actor=actor)
+        token = signing.dumps({"number": old_number, "actor_id": actor.pk}, salt=SALT)
+        self.assertEqual(issue_number(actor)[0][-1], "A")
+        self.assertEqual(number_from_token(token, actor), old_number)
+
+    def test_letters_follow_first_use_and_remain_fixed_through_z(self):
+        actors = [get_user_model().objects.create_user(username=f"owner_{i}") for i in range(27)]
+        for actor, letter in zip(reversed(actors[:26]), "ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+            number, token = issue_number(actor)
+            self.assertEqual(number[-1], letter)
+            self.assertEqual(number_from_token(token, actor), number)
+            self.assertEqual(issue_number(actor)[0][-1], letter)
+        with self.assertRaisesMessage(ValidationError, "最多支持 26 人"):
+            issue_number(actors[26])
+        self.assertEqual(MaintenanceOwnerCode.objects.count(), 26)
+        self.assertEqual(issue_number(actors[25])[0][-1], "A")
+
+    def test_competing_letter_allocation_uses_next_letter(self):
+        first = get_user_model().objects.create_user(username="first_owner")
+        second = get_user_model().objects.create_user(username="second_owner")
+        MaintenanceOwnerCode.objects.create(actor=first, letter="A")
+        original_filter = MaintenanceOwnerCode.objects.filter
+        stale = True
+
+        def stale_letters(**kwargs):
+            nonlocal stale
+            queryset = original_filter(**kwargs)
+            if stale and kwargs == {"letter": "A"}:
+                stale = False
+                return queryset.none()
+            return queryset
+
+        with patch.object(MaintenanceOwnerCode.objects, "filter", stale_letters):
+            self.assertEqual(issue_number(second)[0][-1], "B")
+        self.assertEqual(issue_number(first)[0][-1], "A")
+
+    def test_exhausted_owner_does_not_consume_other_owners_numbers(self):
+        first = get_user_model().objects.create_user(username="first_owner")
+        second = get_user_model().objects.create_user(username="second_owner")
+        with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                   return_value=date(2030, 1, 1)):
+            first_number, _ = issue_number(first)
+            MaintenanceNumberReservation.objects.bulk_create([
+                MaintenanceNumberReservation(number=f"Y-GD3001{value:02d}A", actor=first)
+                for value in range(1, 100) if f"Y-GD3001{value:02d}A" != first_number
+            ])
+            with self.assertRaisesMessage(ValidationError, "最多预留 99 个"):
+                issue_number(first)
+            self.assertEqual(issue_number(second)[0][-1], "B")
+        with patch("netbox_oa.maintenance_numbering.timezone.localdate",
+                   return_value=date(2030, 2, 1)):
+            self.assertEqual(issue_number(first)[0][-1], "A")
 
 
 class OrderingTests(TestCase):
@@ -465,7 +523,7 @@ class OrderingTests(TestCase):
         page = self.client.get(url)
         form = page.context["form"]
         number = form["number"].value()
-        self.assertRegex(number, r"^Y-GD[0-9]{6}[A-E]$")
+        self.assertRegex(number, r"^Y-GD[0-9]{6}[A-Z]$")
         self.assertNotIn("title", form.fields)
         self.assertTrue(form.fields["number"].disabled)
         response = self.client.post(
@@ -511,10 +569,10 @@ class OrderingTests(TestCase):
             with patch("netbox_oa.maintenance_numbering.timezone.localdate",
                        return_value=date(2031, 1, 1)):
                 next_year, _ = issue_number(self.actor)
-        self.assertEqual(first, "Y-GD300199E")
-        self.assertEqual(second, "Y-GD300198E")
-        self.assertEqual(next_month, "Y-GD300299E")
-        self.assertEqual(next_year, "Y-GD310199E")
+        self.assertEqual(first, "Y-GD300199A")
+        self.assertEqual(second, "Y-GD300198A")
+        self.assertEqual(next_month, "Y-GD300299A")
+        self.assertEqual(next_year, "Y-GD310199A")
         self.assertEqual(number_from_token(token, self.actor), first)
         other = get_user_model().objects.create_user(username="another_number_actor")
         with self.assertRaises(ValidationError):
@@ -551,7 +609,7 @@ class OrderingTests(TestCase):
 
     def test_signed_tokens_reject_invalid_number_formats(self):
         for number in ("Y-GD20260001", "Y-GD2611B03", "Y-GD2611-03B", "G-GD261103B",
-                       "Y-GD260003B", "Y-GD261303B", "Y-GD261103F", "Y-GD261100B", "Y-GD26113B"):
+                       "Y-GD260003B", "Y-GD261303B", "Y-GD261103a", "Y-GD261100B", "Y-GD26113B"):
             with self.subTest(number=number):
                 MaintenanceNumberReservation.objects.create(number=number, actor=self.actor)
                 token = signing.dumps({"number": number, "actor_id": self.actor.pk}, salt=SALT)
@@ -564,13 +622,13 @@ class OrderingTests(TestCase):
         existing = set(MaintenanceNumberReservation.objects.values_list("number", flat=True))
         MaintenanceNumberReservation.objects.bulk_create([
             MaintenanceNumberReservation(number=f"{prefix}{value:02d}{letter}", actor=self.actor)
-            for letter in "ABCDE" for value in range(1, 100)
+            for letter in "A" for value in range(1, 100)
             if f"{prefix}{value:02d}{letter}" not in existing
         ])
         self.client.force_login(self.actor)
         page = self.client.get(reverse("plugins:netbox_oa:maintenanceorder_add"))
         self.assertContains(page, "本月工单编号已用完")
-        self.assertContains(page, "495")
+        self.assertContains(page, "99")
 
     def test_workbench_and_api_only_use_order_number(self):
         self.client.force_login(self.actor)

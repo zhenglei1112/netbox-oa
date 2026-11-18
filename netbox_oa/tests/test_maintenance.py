@@ -395,11 +395,20 @@ class MaintenanceTests(TestCase):
 
     def test_flow_definition_permissions_and_policy_visibility(self):
         url = reverse("plugins:netbox_oa:maintenance_flow_definition")
+        workbench_url = reverse("plugins:netbox_oa:maintenance_workbench_v2")
         self.assertEqual(self.client.get(url).status_code, 302)
         user = get_user_model().objects.create_user(username="definition_reader")
         self.client.force_login(user)
         self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertNotContains(self.client.get(workbench_url), f'href="{url}"')
         self.grant(user, "maintenanceorder", "view")
+        self.assertContains(
+            self.client.get(workbench_url),
+            f'<a class="btn btn-ghost-secondary" href="{url}" title="服务工单流程介绍" '
+            'aria-label="服务工单流程介绍">'
+            '<i class="mdi mdi-help-circle-outline" aria-hidden="true"></i></a>',
+            html=True,
+        )
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "仅查看流程结构")

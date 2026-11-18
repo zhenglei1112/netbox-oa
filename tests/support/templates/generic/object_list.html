@@ -2,4 +2,4 @@
 {% load render_table from django_tables2 %}
 {# Standalone shell; real sorting, pagination and links are rendered by django-tables2. #}
 {% block controls %}<div class="btn-list">{% block extra_controls %}{% endblock %}</div>{% endblock %}
-{% block content %}<form method="get">{{ filter_form.as_p }}<button class="btn btn-primary">筛选</button></form><div class="card table-responsive">{% render_table table %}</div>{% endblock %}
+{% block content %}<form method="get">{{ filter_form.as_p }}<button class="btn btn-primary">筛选</button></form><div class="card table-responsive">{% render_table table %}</div><div class="btn-list d-print-none">{% block bulk_buttons %}{% endblock %}</div>{% endblock %}

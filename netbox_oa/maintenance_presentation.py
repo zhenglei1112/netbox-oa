@@ -7,11 +7,29 @@ from textwrap import wrap
 from django.contrib.auth import get_user_model
 from django.db.models import Min, OuterRef, Q, Subquery
 from django.utils import timezone
+from django.utils.html import format_html, format_html_join
 from users.models import Group
 
 from .maintenance_flow import ROLES
+from .maintenance_materials import SERVICE_ITEMS, service_type_values
 from .models import MaintenanceEvent, MaintenanceOrder, MaintenanceTask
 from .time_display import format_duration
+
+
+def service_type_badges(value):
+    values = service_type_values(value)
+    if not values:
+        return "—"
+    colors = {
+        "fiber": "primary", "construction": "info", "cutover": "purple",
+        "air": "success", "inspection": "secondary", "power": "warning",
+    }
+    labels = dict(SERVICE_ITEMS)
+    badges = format_html_join(
+        "", '<span class="badge text-bg-{}">{}</span>',
+        ((colors.get(item, "secondary"), labels.get(item, item)) for item in values),
+    )
+    return format_html('<div class="d-flex flex-wrap gap-1">{}</div>', badges)
 
 
 def person_name(person, viewer=None):

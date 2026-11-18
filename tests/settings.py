@@ -10,6 +10,7 @@ from pathlib import Path
 
 from django import forms
 from django.apps import AppConfig
+from django.db import models
 
 SECRET_KEY = "local-tests-only"
 PLUGINS_CONFIG = {"netbox_oa": {"contract_type_number_codes": {"维护": "A", "其他": "B"}}}
@@ -181,6 +182,25 @@ def _views_getattr(name):
 netbox_views.__getattr__ = _views_getattr
 sys.modules["netbox.views"] = netbox_views
 
+
+class BulkExport:
+    name = "export"
+
+
+netbox_object_actions = types.ModuleType("netbox.object_actions")
+netbox_object_actions.BulkExport = BulkExport
+sys.modules["netbox.object_actions"] = netbox_object_actions
+
+class RestrictedQuerySet(models.QuerySet):
+    def restrict(self, user, action):
+        permission = f"{self.model._meta.app_label}.{action}_{self.model._meta.model_name}"
+        return self if user.has_perm(permission) else self.none()
+
+
+utilities_querysets = types.ModuleType("utilities.querysets")
+utilities_querysets.RestrictedQuerySet = RestrictedQuerySet
+sys.modules["utilities.querysets"] = utilities_querysets
+
 # Create the base model lazily: model classes require Django's app registry.
 base = types.ModuleType("netbox.models")
 
@@ -188,12 +208,6 @@ base = types.ModuleType("netbox.models")
 def _getattr(name):
     if name != "ChangeLoggedModel":
         raise AttributeError(name)
-    from django.db import models
-
-    class RestrictedQuerySet(models.QuerySet):
-        def restrict(self, user, action):
-            permission = f"{self.model._meta.app_label}.{action}_{self.model._meta.model_name}"
-            return self if user.has_perm(permission) else self.none()
 
     class ChangeLoggedModel(models.Model):
         created = models.DateTimeField(

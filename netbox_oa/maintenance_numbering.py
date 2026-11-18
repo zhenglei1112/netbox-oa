@@ -2,19 +2,46 @@
 
 import re
 import secrets
+from string import ascii_uppercase
 
 from django.core import signing
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from .models import MaintenanceNumberReservation, MaintenanceOrder
+from .models import MaintenanceNumberReservation, MaintenanceOrder, MaintenanceOwnerCode
 
 SALT = "netbox_oa.maintenance.number"
 
 
+def owner_letter(actor):
+    """Allocate once, in first-use order; unique constraints arbitrate competing requests."""
+    for letter in ascii_uppercase:
+        existing = MaintenanceOwnerCode.objects.filter(actor=actor).first()
+        if existing:
+            return existing.letter
+        if MaintenanceOwnerCode.objects.filter(letter=letter).exists():
+            continue
+        try:
+            with transaction.atomic():
+                MaintenanceOwnerCode.objects.create(actor=actor, letter=letter)
+        except IntegrityError:
+            existing = MaintenanceOwnerCode.objects.filter(actor=actor).first()
+            if existing:
+                return existing.letter
+            if not MaintenanceOwnerCode.objects.filter(letter=letter).exists():
+                raise
+        else:
+            return letter
+    existing = MaintenanceOwnerCode.objects.filter(actor=actor).first()
+    if existing:
+        return existing.letter
+    raise ValidationError("线路主管编号字母已用完（最多支持 26 人），请联系管理员。")
+
+
 @transaction.atomic
 def issue_number(actor):
+    letter = owner_letter(actor)
     today = timezone.localdate()
     prefix = f"Y-GD{today.year % 100:02d}{today.month:02d}"
     used = set(MaintenanceNumberReservation.objects.filter(
@@ -25,7 +52,7 @@ def issue_number(actor):
     ).values_list("number", flat=True))
     available = [
         f"{prefix}{value:02d}{letter}"
-        for letter in "ABCDE" for value in range(1, 100)
+        for value in range(1, 100)
         if f"{prefix}{value:02d}{letter}" not in used
     ]
     while available:
@@ -41,7 +68,7 @@ def issue_number(actor):
         else:
             break
     else:
-        raise ValidationError("本月工单编号已用完（最多预留 495 个），请联系管理员。")
+        raise ValidationError("本月工单编号已用完（每位线路主管最多预留 99 个），请联系管理员。")
     return number, signing.dumps({"number": number, "actor_id": actor.pk}, salt=SALT)
 
 
@@ -50,7 +77,7 @@ def number_from_token(token, actor, *, lock=False):
         data = signing.loads(token, salt=SALT, max_age=86400)
         number = data["number"]
         if data["actor_id"] != actor.pk or not re.fullmatch(
-            r"Y-GD[0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[1-9][0-9])[A-E]", number
+            r"Y-GD[0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[1-9][0-9])[A-Z]", number
         ):
             raise ValueError
         reservations = MaintenanceNumberReservation.objects

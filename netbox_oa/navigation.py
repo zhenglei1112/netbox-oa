@@ -2,9 +2,9 @@ from netbox.plugins import PluginMenu, PluginMenuItem
 
 service_order_items = (
     PluginMenuItem(
-        link="plugins:netbox_oa:maintenance_flow_definition",
-        link_text="服务工单流程介绍",
-        permissions=["netbox_oa.view_maintenanceorder"],
+        link="plugins:netbox_oa:workorderledger_list",
+        link_text="工单台账",
+        permissions=["netbox_oa.view_workorderledger"],
     ),
     PluginMenuItem(
         link="plugins:netbox_oa:maintenance_workbench_v2",

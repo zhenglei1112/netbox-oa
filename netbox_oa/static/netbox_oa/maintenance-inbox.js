@@ -332,8 +332,9 @@
         if (method === 'POST' || mode === 'search') history.replaceState(position, '', targetUrl);
         else history.pushState({}, '', targetUrl);
       }
+      const resetList = mode === 'search' || (response.ok && method === 'POST' && next.dataset.locatedOrder);
       restore(taskCompleted ? {oaList: 0, oaDetail: 0, oaAudit: 0, oaAuditDialog: 0, oaWindow: 0}
-        : pop ? state : {...position, oaList: mode === 'search' ? 0 : position.oaList,
+        : pop ? state : {...position, oaList: resetList ? 0 : position.oaList,
         oaDetail: mode === 'detail' ? 0 : position.oaDetail});
       if (mode === 'history' && anchorId) {
         const newAnchor = historyScroll().querySelector(`[data-event-id="${anchorId}"]`);
