@@ -48,6 +48,9 @@ class ObjectChangeLogView(LoginRequiredMixin, View):
 
 
 class ObjectListView(BaseObjectView):
+    template_name = "generic/object_list.html"
+    filterset_form = None
+
     def get_extra_context(self, request):
         return {}
 
@@ -69,6 +72,11 @@ class ObjectListView(BaseObjectView):
             return response
         return render(request, self.template_name, {
             "model": self.queryset.model, "table": table,
-            "filter_form": self.filterset_form(request.GET), "actions": getattr(self, "actions", ()),
+            "filter_form": self.filterset_form(request.GET) if self.filterset_form else None,
+            "actions": getattr(self, "actions", ()),
             **self.get_extra_context(request),
         })
+
+
+class ObjectEditView(BaseObjectView):
+    pass

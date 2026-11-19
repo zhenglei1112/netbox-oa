@@ -72,6 +72,16 @@ test('server validation errors and native message fragments are consumed after A
   assert.equal(app.shown.length, 1);
 });
 
+test('dialog field errors stay visible inside an inline-error panel', () => {
+  const app = setup();
+  const error = new app.Element();
+  error.textContent = '请选择有效的办理人员。';
+  error.closest = selector => selector.includes('[data-oa-inline-errors]') ? {} : null;
+  app.window.oaNotifyPage({querySelectorAll: () => [error]});
+  assert.equal(error.hidden, undefined);
+  assert.equal(app.shown.length, 0);
+});
+
 test('browser validation is routed to a toast instead of a separate browser bubble', () => {
   const app = setup();
   let prevented = false;

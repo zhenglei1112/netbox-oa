@@ -188,6 +188,8 @@ class BulkExport:
 
 
 netbox_object_actions = types.ModuleType("netbox.object_actions")
+netbox_object_actions.AddObject = type("AddObject", (), {"name": "add"})
+netbox_object_actions.EditObject = type("EditObject", (), {"name": "edit"})
 netbox_object_actions.BulkExport = BulkExport
 sys.modules["netbox.object_actions"] = netbox_object_actions
 

@@ -66,6 +66,9 @@
 .oa-scans-heading{margin-top:24px;margin-bottom:0!important}
 
 html.oa-panel-open{overflow:hidden}.oa-panel{width:min(620px,100%);max-width:100%}
+html:has(.oa-inbox #routing),.oa-inbox #routing .oa-panel-body{scrollbar-gutter:stable}
+.oa-inbox #routing:modal:has(.oa-panel-note[role=alert]){animation:none}
+.oa-inbox #routing .oa-panel-note[role=alert]{color:var(--tblr-danger-text-emphasis,var(--bs-danger-text-emphasis))}
 /* Card-level interaction replaces text underlines throughout the workbench. */
 .oa-inbox.oa-industrial a,
 .oa-inbox.oa-industrial a:is(:hover, :focus-visible) {

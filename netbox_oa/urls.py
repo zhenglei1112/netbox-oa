@@ -14,6 +14,11 @@ urlpatterns = [
         name="workflowdefinition_add",
     ),
     path(
+        "definitions/maintenance-service-order/",
+        views.MaintenanceWorkflowSummaryView.as_view(),
+        name="maintenance_workflow_summary",
+    ),
+    path(
         "definitions/<int:pk>/", views.WorkflowDefinitionView.as_view(), name="workflowdefinition"
     ),
     path(

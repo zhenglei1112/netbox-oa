@@ -5,6 +5,7 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import ProtectedError
 from django.test import TestCase
+from django.urls import reverse
 from django_fsm_log.models import StateLog
 from users.models import Group
 
@@ -60,6 +61,72 @@ class WorkflowTests(TestCase):
     def submit(self):
         instance = self.create()
         return services.submit_instance(pk=instance.pk, actor=self.requester)
+
+    def test_definition_list_includes_read_only_entry_in_same_table(self):
+        self.client.force_login(self.requester)
+        list_url = reverse("plugins:netbox_oa:workflowdefinition_list")
+        summary_url = reverse("plugins:netbox_oa:maintenance_workflow_summary")
+        response = self.client.get(list_url)
+        self.assertContains(response, self.definition.name)
+        self.assertContains(response, f'href="{summary_url}">代维单位维护服务工单流程</a>')
+        self.assertEqual(response.context["table"].paginator.count, 2)
+        for filters, expected_count, shows_entry in (
+            ({"q": "维护服务"}, 1, True),
+            ({"slug": "MAINTENANCE-SERVICE-ORDER"}, 1, True),
+            ({"q": "device-change"}, 1, False),
+            ({"q": "no match"}, 0, False),
+            ({"enabled": "true"}, 1, False),
+            ({"id": self.definition.pk}, 1, False),
+            ({"sort": "-enabled"}, 2, True),
+        ):
+            with self.subTest(filters=filters):
+                response = self.client.get(list_url, filters)
+                self.assertEqual(response.context["table"].paginator.count, expected_count)
+                if shows_entry:
+                    self.assertContains(response, summary_url)
+                else:
+                    self.assertNotContains(response, summary_url)
+        self.definition.delete()
+        response = self.client.get(list_url)
+        self.assertEqual(response.context["table"].paginator.count, 1)
+        self.assertContains(response, summary_url)
+        self.assertIsNone(next(iter(response.context["table"].rows)).record.pk)
+        self.assertFalse(WorkflowDefinition.objects.exists())
+        self.assertNotContains(self.client.get(list_url, {"export": "table"}), "内置流程")
+        create_url = reverse("plugins:netbox_oa:workflowinstance_add")
+        self.assertNotContains(self.client.get(create_url), "代维单位维护服务工单流程")
+
+    def test_maintenance_summary_lists_current_approvals_and_is_get_only(self):
+        self.client.force_login(self.requester)
+        url = reverse("plugins:netbox_oa:maintenance_workflow_summary")
+        response = self.client.get(url)
+        self.assertEqual(response.context["approvals"], [
+            ("工单下单", "工单复核", "复核人"),
+            ("工单下单", "工单部门审核", "部门负责人"),
+            ("工单下单", "工单公司审批", "上级负责人"),
+            ("工单验收", "验收复核", "复核人"),
+            ("工单验收", "验收部门审核", "部门负责人"),
+            ("工单验收", "验收公司审批", "上级负责人"),
+            ("付款申请", "付款部门审核", "部门负责人"),
+        ])
+        self.assertContains(response, reverse("plugins:netbox_oa:maintenance_flow_definition"))
+        self.assertEqual(self.client.post(url).status_code, 405)
+
+    def test_maintenance_entry_and_summary_require_both_kinds_of_view_access(self):
+        list_url = reverse("plugins:netbox_oa:workflowdefinition_list")
+        summary_url = reverse("plugins:netbox_oa:maintenance_workflow_summary")
+        reader = get_user_model().objects.create_user(username="definition_reader")
+        self.grant(reader, "workflowdefinition", "view")
+        self.client.force_login(reader)
+        self.assertNotContains(self.client.get(list_url), summary_url)
+        self.assertEqual(self.client.get(summary_url).status_code, 403)
+        self.grant(reader, "maintenancepolicy", "view")
+        self.assertContains(self.client.get(list_url), summary_url)
+        self.assertEqual(self.client.get(summary_url).status_code, 200)
+        maintenance_reader = get_user_model().objects.create_user(username="maintenance_reader")
+        self.grant(maintenance_reader, "maintenanceorder", "view")
+        self.client.force_login(maintenance_reader)
+        self.assertEqual(self.client.get(summary_url).status_code, 403)
 
     def test_sequential_approvals_and_audit(self):
         instance = self.submit()

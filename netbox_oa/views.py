@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 from django_fsm_log.models import StateLog
@@ -8,13 +8,47 @@ from netbox.object_actions import AddObject, EditObject
 from netbox.views import generic
 
 from . import filtersets, forms, models, services, tables
+from .maintenance_flow import FLOW_NAME, ROLES, STAGES, build_steps
+
+
+def can_view_maintenance_workflow(user):
+    return user.has_perm("netbox_oa.view_workflowdefinition") and (
+        user.has_perm("netbox_oa.view_maintenanceorder")
+        or user.has_perm("netbox_oa.view_maintenancepolicy")
+    )
 
 
 class WorkflowDefinitionListView(generic.ObjectListView):
     queryset = models.WorkflowDefinition.objects.all()
     table = tables.WorkflowDefinitionTable
-    filterset = filtersets.WorkflowDefinitionFilterSet
+    filterset = filtersets.WorkflowDefinitionListFilterSet
     actions = (AddObject,)
+
+    def get_table(self, data, request, bulk_actions=True):
+        if "export" not in request.GET and can_view_maintenance_workflow(request.user):
+            entry = tables.MaintenanceWorkflowEntry()
+            filters = self.filterset(request.GET, request=request)
+            if filters.matches_read_only_entry(entry):
+                data = [entry, *data]
+        return super().get_table(data, request, bulk_actions=bulk_actions)
+
+
+class MaintenanceWorkflowSummaryView(LoginRequiredMixin, View):
+    def get(self, request):
+        if not can_view_maintenance_workflow(request.user):
+            raise PermissionDenied
+        stage_names = dict(STAGES)
+        role_names = dict(ROLES)
+        sla_hours = models.MaintenancePolicy._meta.get_field("sla_hours").default
+        approvals = [
+            (stage_names[step["stage"]], step["name"], role_names[step["role"]])
+            for step in build_steps({}, sla_hours)
+            if step["kind"] == "approval"
+        ]
+        return render(request, "netbox_oa/maintenance_workflow_summary.html", {
+            "flow_name": FLOW_NAME,
+            "approvals": approvals,
+        })
 
 
 class WorkflowDefinitionView(generic.ObjectView):

@@ -346,7 +346,7 @@
         const notice = detail();
         notice.setAttribute('tabindex', '-1');
         notice.focus({preventScroll: true});
-      } else if (method === 'POST') {
+      } else if (method === 'POST' && !detail().querySelector('#routing[open]')) {
         const current = detail().querySelector('#oa-current');
         if (current) {
           current.setAttribute('tabindex', '-1');

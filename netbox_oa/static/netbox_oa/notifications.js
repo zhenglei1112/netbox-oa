@@ -108,7 +108,7 @@
     for (const element of page.querySelectorAll(
       '#django-messages .toast, .oa-feedback p, .errorlist, .invalid-feedback, .alert[role="alert"], [data-oa-notice]'
     )) {
-      if (element.closest('[data-oa-toasts]')) continue;
+      if (element.closest('[data-oa-toasts], [data-oa-inline-errors]')) continue;
       const message = (element.querySelector('.toast-body') || element).textContent.trim();
       element.hidden = true;
       element.style.display = 'none';

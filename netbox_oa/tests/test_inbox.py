@@ -1270,6 +1270,28 @@ class InboxTests(TestCase):
         )
         self.assertNotContains(response, "<details", status_code=400)
 
+    def test_routing_requires_comment_and_displays_error_inside_dialog(self):
+        self.start()
+        target = self.worker("routing_target")
+        task = self.current()
+
+        for operation, comment in (("transfer", ""), ("countersign", "   ")):
+            with self.subTest(operation=operation):
+                response = self.action(operation, {
+                    "user_id": target.pk, "comment": comment, "return_panel": "routing",
+                })
+                self.assertContains(
+                    response, "请填写处理意见，最多 4000 字符。", count=1, status_code=400,
+                )
+                start = response.content.decode().split('id="routing"', 1)[1]
+                panel = start.split("</dialog>", 1)[0]
+                self.assertIn("data-oa-inline-errors", panel)
+                self.assertIn('role="alert" tabindex="-1" autofocus', panel)
+                self.assertIn("请填写处理意见，最多 4000 字符。", panel)
+                self.assertEqual(
+                    response.context["routing_form"]["user_id"].value(), str(target.pk),
+                )
+                self.assertFalse(self.order.events.filter(action=operation, task=task).exists())
 
     def test_activity_is_a_separate_region_with_six_recent_icons(self):
         self.start()

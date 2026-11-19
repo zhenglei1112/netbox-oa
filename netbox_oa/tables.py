@@ -1,7 +1,21 @@
 import django_tables2 as tables
+from django.urls import reverse
 from netbox.tables import NetBoxTable
 
+from .maintenance_flow import FLOW_NAME
 from .models import WorkflowDefinition, WorkflowInstance, WorkflowTask
+
+
+class MaintenanceWorkflowEntry:
+    name = FLOW_NAME
+    slug = "maintenance-service-order"
+    description = "内置流程 · 只读"
+    enabled = None
+    id = None
+    pk = None
+
+    def get_absolute_url(self):
+        return reverse("plugins:netbox_oa:maintenance_workflow_summary")
 
 
 class WorkflowDefinitionTable(NetBoxTable):

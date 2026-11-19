@@ -1,0 +1,28 @@
+{% extends 'generic/_base.html' %}
+
+{% block title %}{{ flow_name }}{% endblock %}
+
+{% block controls %}
+  <div class="btn-list">
+    <a class="btn btn-outline-secondary" href="{% url 'plugins:netbox_oa:workflowdefinition_list' %}">返回流程定义</a>
+    <a class="btn btn-outline-primary" href="{% url 'plugins:netbox_oa:maintenance_flow_definition' %}">查看完整流程图</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2 class="card-header">审批节点</h2>
+    <div class="table-responsive">
+      <table class="table card-table">
+        <thead>
+          <tr><th scope="col">顺序</th><th scope="col">阶段</th><th scope="col">审批节点</th><th scope="col">处理角色</th></tr>
+        </thead>
+        <tbody>
+          {% for stage, name, role in approvals %}
+            <tr><td>{{ forloop.counter }}</td><td>{{ stage }}</td><td>{{ name }}</td><td>{{ role }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
