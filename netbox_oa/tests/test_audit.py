@@ -107,6 +107,8 @@ class MaintenanceAuditTests(TestCase):
                 change = event.to_objectchange("create")
                 self.assertEqual(event.details["comment"], "办理意见" * 500)
                 if action in MaintenanceEvent.AUDIT_OPERATIONS:
+                    with self.subTest(action=action):
+                        self.assertEqual(change.action, "create" if action == "create" else "update")
                     labels.add(change.message)
                     self.assertNotIn("details", change.postchange_data)
                     self.assertNotIn("comment", change.postchange_data)

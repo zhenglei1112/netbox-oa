@@ -715,7 +715,8 @@ class MaintenanceEvent(ChangeLoggedModel):
         if (action != "create" or self.action not in self.AUDIT_OPERATIONS
                 or not self.details.get("audit", True)):
             return None
-        change = super().to_objectchange(action)
+        audit_action = "create" if self.action == "create" else "update"
+        change = super().to_objectchange(audit_action)
         change.related_object = self.order
         change.message = self.operation_summary
         change.object_repr = f"{self.order.number} · {self.operation_summary}"[:200]
