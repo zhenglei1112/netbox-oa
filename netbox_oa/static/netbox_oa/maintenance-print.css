@@ -9,18 +9,18 @@
 .order-sheet .acceptance-billing-table tr > :first-child { border-left: 0; }
 .order-sheet .acceptance-billing-table tr > :last-child { border-right: 0; }
 .acceptance-billing-table .billing-index-column { width: 5%; }
-.acceptance-billing-table .billing-name-column { width: 25%; }
-.acceptance-billing-table .billing-price-column { width: 30%; }
+.acceptance-billing-table .billing-name-column { width: 33%; }
+.acceptance-billing-table .billing-price-column { width: 14%; }
 .acceptance-billing-table .billing-quantity-column,
-.acceptance-billing-table .billing-amount-column { width: 10%; }
+.acceptance-billing-table .billing-deduction-column { width: 10%; }
+.acceptance-billing-table .billing-amount-column { width: 14%; }
 .order-sheet .acceptance-table .billing-service-period td { text-align: left; }
 @media print {
   .acceptance-table .billing-service-period { display: none; }
 }
 .order-sheet .acceptance-table .billing-row th, .order-sheet .acceptance-table .billing-row td { padding: 1.5mm 1mm; }
 .order-sheet .acceptance-table .billing-row td:nth-last-child(-n+3) { padding-inline: .5mm; }
-.order-sheet .acceptance-table .billing-row td:nth-child(2),
-.order-sheet .acceptance-table .billing-row td:nth-child(3) { text-align: left; padding-inline-start: .5em; }
+.order-sheet .acceptance-table .billing-row td:nth-child(2) { text-align: left; padding-inline-start: .5em; }
 .order-sheet .acceptance-table .routine-maintenance-label { display: inline-block; vertical-align: text-bottom; margin-inline-start: .5mm; padding: .2mm 1mm; border-radius: .5mm; background: #767676; color: #fff; font: 400 9pt/1.5 "Microsoft YaHei", "SimHei", sans-serif; white-space: nowrap; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 .order-sheet .acceptance-table .billing-total { text-align: right; font-weight: 400; }
 .order-sheet .acceptance-table .billing-unit-label { margin-inline-start: .25em; font-size: 10pt; font-weight: 400; color: #666; white-space: nowrap; }

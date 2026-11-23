@@ -1,12 +1,12 @@
 <tr aria-label="结算明细"><th colspan="20" class="section-heading">结算明细<span class="billing-unit-label">（单位：元）</span></th></tr>
 <tr><td colspan="20" class="acceptance-billing-cell">
 <table class="acceptance-billing-table">
-<colgroup><col class="billing-index-column"><col class="billing-name-column"><col class="billing-price-column"><col class="billing-quantity-column"><col class="billing-amount-column"><col class="billing-amount-column"><col class="billing-amount-column"></colgroup>
+<colgroup><col class="billing-index-column"><col class="billing-name-column"><col class="billing-price-column"><col class="billing-quantity-column"><col class="billing-amount-column"><col class="billing-deduction-column"><col class="billing-amount-column"></colgroup>
 <thead><tr class="billing-row"><th>序号</th><th>服务项目</th><th>计费单价</th><th>数量</th><th>小计</th><th>扣费金额</th><th>结算价格</th></tr></thead>
 <tbody>{% for item in snapshot.documents %}
     {% for line in item.billing_data.lines %}<tr class="billing-row">
       <td>{{ forloop.counter }}</td><td>{{ line.name }}{% if line.routine_maintenance %} <span class="routine-maintenance-label">日常代维</span>{% endif %}</td>
-      <td>{{ line.unit_price }}元</td><td>{{ line.quantity }} {{ line.unit }}</td><td>{{ line.gross }}</td><td>{{ line.deduction }}</td><td>{{ line.net }}</td>
+      <td>{{ line.unit_price }}</td><td>{{ line.quantity }} {{ line.unit }}</td><td>{{ line.gross }}</td><td>{{ line.deduction }}</td><td>{{ line.net }}</td>
     </tr>{% endfor %}
 {% endfor %}</tbody>
 </table></td></tr>
