@@ -1318,6 +1318,45 @@ class InboxTests(TestCase):
         self.assertEqual(len(icons), 2)
         self.assertTrue(all(attrs.get("aria-label") for attrs in icons))
 
+    def test_activity_pending_shows_assignee_and_waiting_consistent_with_main_panel(self):
+        self.start()
+        current = self.current()
+        now = timezone.now()
+        cases = (
+            ("normal", now + timedelta(days=5), "", ""),
+            ("warning", now + timedelta(hours=1), '<strong class="text-warning"> · 即将超时</strong>', " · 即将超时"),
+            ("overdue", now - timedelta(hours=2), '<strong class="text-danger"> · 已超时</strong>', " · 已超时"),
+        )
+        for state, deadline, badge_html, badge_text in cases:
+            with self.subTest(state=state):
+                MaintenanceTask.objects.filter(pk=current.pk).update(
+                    created=now - timedelta(hours=3),
+                    deadline=deadline,
+                )
+                response = self.page()
+                detail = response.context["detail"]
+                self.assertEqual(detail["deadline_state"], state)
+                html = response.content.decode()
+                main_assignee = html.split('<footer class="oa-v2-assignee">', 1)[1].split("</footer>", 1)[0]
+                audit_pending = html.split('<div class="oa-audit-pending">', 1)[1].split("</div>", 1)[0]
+                expected_assignee = f"<span>办理人 / 组：{detail['waiting_for']}</span>"
+                expected_waiting = f"<span>已等待 {detail['waiting']}{badge_html}</span>"
+                self.assertIn(expected_assignee, main_assignee)
+                self.assertIn(expected_waiting, main_assignee)
+                self.assertIn(expected_assignee, audit_pending)
+                self.assertIn(expected_waiting, audit_pending)
+                elements = PanelMarkup(html).elements
+                compact_pending = next(
+                    attrs for tag, attrs in elements
+                    if tag == "a" and "oa-audit-compact-pending" in attrs.get("class", "")
+                )
+                expected_label = (
+                    f"{detail['current'].name} · 办理人 / 组：{detail['waiting_for']}"
+                    f" · 已等待 {detail['waiting']}{badge_text}"
+                )
+                self.assertIn(expected_label, compact_pending["title"])
+                self.assertEqual(compact_pending["aria-label"], expected_label)
+
     def test_compact_activity_labels_and_complete_hover_details(self):
         from netbox_oa.templatetags.oa_filters import activity_initial
 
@@ -1590,4 +1629,4 @@ class InboxTests(TestCase):
             response = self.page()
         self.assertEqual(response.context["rows"][0]["waiting"], "6天14小时24分钟")
         self.assertEqual(response.context["detail"]["waiting"], "6天14小时24分钟")
-        self.assertContains(response, "6天14小时24分钟", count=2)
+        self.assertContains(response, "6天14小时24分钟", count=5)

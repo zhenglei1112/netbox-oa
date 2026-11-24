@@ -15,7 +15,8 @@
     if (supplier) supplier.value = contract.supplier || '';
     const region = document.getElementById('id_service_region');
     if (region && (contractChanged || (!region.selectedOptions.length && region.dataset?.oaPreserveEmpty !== '1'))) {
-      const ids = (contract.service_region_ids || []).map(String);
+      const rawIds = contract.service_region_ids || [];
+      const ids = rawIds.length === 1 ? [String(rawIds[0])] : [];
       for (const option of region.options) option.selected = ids.includes(option.value);
       // Keep NetBox's enhanced select display in sync with the native selection.
       if (region.tomselect) region.tomselect.setValue(ids);
