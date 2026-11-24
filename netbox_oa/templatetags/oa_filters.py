@@ -136,6 +136,12 @@ def activity_time(value):
 
 
 @register.filter
+def billing_unit(value):
+    """Display kilometer units as km, including legacy saved snapshots."""
+    return "km" if value == "公里" else (value or "")
+
+
+@register.filter
 def duration_hours(value):
     """Display stored hour quantities as days, hours and minutes."""
     try:

@@ -117,7 +117,7 @@
     unitPrice.disabled = true;
     unitPrice.hidden = true;
     specWrapper.append(unitPrice);
-    field('quantity', '数量（次／班次／台／公里／个）', 'number', '1');
+    field('quantity', '数量（次／班次／台／km／个）', 'number', '1');
     field('deduction', '扣费金额（元）', 'number', '0');
     body.append(fields);
     if (container.dataset.routineMaintenanceAllowed === '1') {

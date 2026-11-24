@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 
-from netbox_oa.templatetags.oa_filters import cny_number
+from netbox_oa.maintenance_billing import UNITS
+from netbox_oa.templatetags.oa_filters import billing_unit, cny_number
 
 
 class CurrencyDisplayTests(SimpleTestCase):
@@ -31,3 +32,21 @@ class CurrencyDisplayTests(SimpleTestCase):
         self.assertNotIn("（元）", html)
         for label in ("序号", "计费单价", "小计", "扣费金额", "结算价格"):
             self.assertIn(f">{label}</th>", html)
+
+    def test_km_unit_displays_as_km_for_new_and_legacy_snapshots(self):
+        self.assertEqual(UNITS["km"], "km")
+        self.assertEqual(billing_unit("公里"), "km")
+        self.assertEqual(billing_unit("km"), "km")
+        self.assertEqual(billing_unit("次"), "次")
+        line = {"name": "光缆", "unit_price": "5000", "quantity": "0.795",
+                "unit": "公里", "gross": "3975.00", "deduction": "0.00", "net": "3975.00"}
+        print_html = render_to_string("netbox_oa/maintenance/acceptance_print_table.html", {
+            "data": {"settlement_billing": {"documents": [{"billing_data": {"lines": [line]}}],
+                                            "total": "3975.00"}},
+        })
+        table_html = render_to_string("netbox_oa/maintenance/settlement_billing_table.html", {
+            "billing": {"lines": [line], "total": "3975.00"},
+        })
+        for html in (print_html, table_html):
+            self.assertIn("0.795 km", html)
+            self.assertNotIn("公里", html)

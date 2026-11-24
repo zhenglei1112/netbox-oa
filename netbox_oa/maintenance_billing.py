@@ -18,7 +18,7 @@ from .services import _allowed, _require_actor, _save
 CENT = Decimal("0.01")
 LIMIT = Decimal("999999999999.99")
 METHODS = {"fixed": "固定单价", "tiered": "按规格分档", "duration": "首班次及超时"}
-UNITS = {"fault": "次", "shift": "班次", "device": "台", "km": "公里", "piece": "个"}
+UNITS = {"fault": "次", "shift": "班次", "device": "台", "km": "km", "piece": "个"}
 
 
 def number(value, label, *, positive=False):
